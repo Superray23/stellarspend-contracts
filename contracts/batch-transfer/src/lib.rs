@@ -10,7 +10,8 @@ pub use crate::types::{
     BatchBurnResult, BatchTransferResult, BurnRequest, BurnResult, DataKey, TransferEvents,
     TransferRequest, TransferResult, MAX_BATCH_SIZE,
 };
-use crate::validation::{validate_address, validate_amount, validate_unique_recipient};
+//bbbb
+use crate::validation::{validate_address, validate_amount};
 
 /// Error codes for the batch transfer contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
