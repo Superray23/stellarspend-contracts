@@ -36,6 +36,7 @@ name = "stellarspend-contracts-tests"
 version = "0.1.0"
 edition = "2021"
 publish = false
+autotests = false
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
@@ -47,6 +48,10 @@ path = "tests/snapshot_tests.rs"
 [[test]]
 name = "memo_tests"
 path = "tests/memo_tests.rs"
+
+[[test]]
+name = "governance_test"
+path = "contracts/tests/governance_test.rs"
 
 [workspace.package]
 version = "0.1.0"
