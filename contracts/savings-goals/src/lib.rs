@@ -64,6 +64,8 @@ pub enum SavingsGoalError {
     GoalLocked = 11,
     /// Goal has expired
     GoalExpired = 12,
+    /// One or more prerequisite goals are not complete
+    DependencyNotMet = 13,
 }
 
 impl From<SavingsGoalError> for soroban_sdk::Error {
@@ -523,6 +525,26 @@ impl SavingsGoalsContract {
 
         if !goal.is_active {
             panic_with_error!(&env, SavingsGoalError::GoalNotActive);
+        }
+
+        // Enforce prerequisite goals: cannot contribute until all prerequisites complete
+        let prereqs: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GoalPrereqs(goal_id))
+            .unwrap_or(Vec::new(&env));
+        for pid in prereqs.iter() {
+            let pgoal_opt: Option<SavingsGoal> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Goal(*pid));
+            if let Some(pgoal) = pgoal_opt {
+                if !pgoal.is_complete {
+                    panic_with_error!(&env, SavingsGoalError::DependencyNotMet);
+                }
+            } else {
+                panic_with_error!(&env, SavingsGoalError::GoalNotFound);
+            }
         }
 
         goal.current_amount = goal.current_amount.checked_add(amount).unwrap_or(i128::MAX);
@@ -1038,6 +1060,81 @@ impl SavingsGoalsContract {
         if *caller != admin {
             panic_with_error!(env, SavingsGoalError::Unauthorized);
         }
+    }
+
+    /// Sets prerequisite goal IDs for a specific goal. The caller must be the goal owner.
+    /// Prevents circular dependencies when setting prerequisites.
+    pub fn set_goal_prerequisites(env: Env, caller: Address, goal_id: u64, prereq_ids: Vec<u64>) {
+        caller.require_auth();
+
+        let goal: SavingsGoal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Goal(goal_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SavingsGoalError::GoalNotFound));
+
+        if goal.user != caller {
+            panic_with_error!(&env, SavingsGoalError::Unauthorized);
+        }
+
+        // Validate prerequisites exist, belong to the same owner, and do not form cycles
+        for p in prereq_ids.iter() {
+            if *p == goal_id {
+                panic_with_error!(&env, SavingsGoalError::DependencyNotMet);
+            }
+
+            let pgoal: SavingsGoal = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Goal(*p))
+                .unwrap_or_else(|| panic_with_error!(&env, SavingsGoalError::GoalNotFound));
+
+            if pgoal.user != caller {
+                // Disallow cross-user prerequisites
+                panic_with_error!(&env, SavingsGoalError::Unauthorized);
+            }
+
+            // Check for circular dependency: is there a path from p -> goal_id ?
+            if Self::has_dependency_path(&env, *p, goal_id) {
+                panic_with_error!(&env, SavingsGoalError::DependencyNotMet);
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::GoalPrereqs(goal_id), &prereq_ids);
+    }
+
+    // Depth-first search to detect if there's a path from `start` to `target`.
+    fn has_dependency_path(env: &Env, start: u64, target: u64) -> bool {
+        let mut stack: Vec<u64> = Vec::new(env);
+        let mut visited: Vec<u64> = Vec::new(env);
+        stack.push_back(start);
+
+        while stack.len() > 0 {
+            let node = stack.pop_back().unwrap();
+            if node == target {
+                return true;
+            }
+            if visited.contains(&node) {
+                continue;
+            }
+            visited.push_back(node);
+
+            let neighbors: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::GoalPrereqs(node))
+                .unwrap_or(Vec::new(env));
+
+            for n in neighbors.iter() {
+                if !visited.contains(&n) {
+                    stack.push_back(*n);
+                }
+            }
+        }
+
+        false
     }
 }
 

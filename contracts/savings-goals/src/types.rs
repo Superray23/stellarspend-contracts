@@ -223,6 +223,8 @@ pub enum DataKey {
     GoalMilestones(u64),
     /// Goal's milestone percentages triggered (goal_id -> Vec<u32>)
     GoalMilestonesPercent(u64),
+    /// Goal prerequisite relationships (goal_id -> Vec<goal_id>)
+    GoalPrereqs(u64),
     /// Total milestones achieved lifetime
     TotalMilestonesAchieved,
     /// Maps (user, goal_name) -> goal_id for duplicate detection
