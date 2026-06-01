@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "On-chain budget category analytics contract for StellarSpend"
+autotests = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

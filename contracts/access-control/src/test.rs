@@ -192,6 +192,39 @@ fn test_get_user_roles() {
 }
 
 #[test]
+fn test_get_user_roles_returns_empty_for_user_with_no_roles() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    let roles = client.get_user_roles(&user);
+
+    assert_eq!(roles.get(Role::Admin), None);
+    assert_eq!(roles.get(Role::User), None);
+    assert_eq!(roles.get(Role::Operator), None);
+    assert_eq!(roles.get(Role::Auditor), None);
+    assert!(!client.has_any_role(&user));
+}
+
+#[test]
+fn test_has_any_role_returns_true_for_assigned_roles() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.grant_role(&admin, &user, &Role::Auditor);
+
+    assert!(client.has_any_role(&user));
+    assert_eq!(client.get_user_roles(&user).get(Role::Auditor), Some(true));
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #2)")]
 fn test_non_admin_cannot_grant_role() {
     let (env, contract_id, _) = create_contract();
@@ -322,4 +355,282 @@ fn test_complex_role_management() {
     assert!(!client.has_role(&user1, &Role::Operator));
     assert!(client.has_role(&user2, &Role::Auditor));
     assert!(!client.has_role(&user3, &Role::User));
+}
+
+// ─── Admin Role Enforcement Regression Tests ──────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_non_admin_cannot_grant_user_role() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let attacker = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Attacker attempts to grant role without being admin
+    client.grant_role(&attacker, &target, &Role::User);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_non_admin_cannot_grant_operator_role() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let attacker = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Attacker attempts to grant operator role
+    client.grant_role(&attacker, &target, &Role::Operator);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_non_admin_cannot_grant_auditor_role() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let attacker = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Attacker attempts to grant auditor role
+    client.grant_role(&attacker, &target, &Role::Auditor);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_user_cannot_revoke_own_roles() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant user a role
+    client.grant_role(&admin, &user, &Role::User);
+
+    // User tries to revoke their own role (must be admin)
+    client.revoke_role(&user, &user, &Role::User);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_operator_cannot_revoke_roles() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let operator = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant roles
+    client.grant_role(&admin, &operator, &Role::Operator);
+    client.grant_role(&admin, &target, &Role::User);
+
+    // Operator tries to revoke role (must be admin)
+    client.revoke_role(&operator, &target, &Role::User);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_auditor_cannot_grant_roles() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let auditor = Address::generate(&env);
+    let target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant auditor role
+    client.grant_role(&admin, &auditor, &Role::Auditor);
+
+    // Auditor tries to grant role (must be admin)
+    client.grant_role(&auditor, &target, &Role::User);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_non_admin_cannot_transfer_admin_to_another() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let attacker = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Attacker tries to transfer admin to someone else
+    client.transfer_admin(&attacker, &new_admin);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_cannot_transfer_admin_without_auth() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let new_admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Non-admin tries to transfer admin role
+    client.transfer_admin(&non_admin, &new_admin);
+}
+
+#[test]
+fn test_admin_can_grant_all_role_types() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Admin can grant all role types
+    client.grant_role(&admin, &user, &Role::User);
+    assert!(client.has_role(&user, &Role::User));
+
+    let user2 = Address::generate(&env);
+    client.grant_role(&admin, &user2, &Role::Operator);
+    assert!(client.has_role(&user2, &Role::Operator));
+
+    let user3 = Address::generate(&env);
+    client.grant_role(&admin, &user3, &Role::Auditor);
+    assert!(client.has_role(&user3, &Role::Auditor));
+}
+
+#[test]
+fn test_admin_can_revoke_all_role_types() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant roles
+    client.grant_role(&admin, &user, &Role::User);
+    client.grant_role(&admin, &user, &Role::Operator);
+    client.grant_role(&admin, &user, &Role::Auditor);
+
+    // Admin can revoke all role types
+    client.revoke_role(&admin, &user, &Role::User);
+    assert!(!client.has_role(&user, &Role::User));
+
+    client.revoke_role(&admin, &user, &Role::Operator);
+    assert!(!client.has_role(&user, &Role::Operator));
+
+    client.revoke_role(&admin, &user, &Role::Auditor);
+    assert!(!client.has_role(&user, &Role::Auditor));
+}
+
+#[test]
+fn test_privilege_escalation_prevented() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant user role only
+    client.grant_role(&admin, &user, &Role::User);
+    assert!(client.has_role(&user, &Role::User));
+    assert!(!client.has_role(&user, &Role::Admin));
+
+    // User cannot grant themselves admin role
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.grant_role(&user, &user, &Role::Admin);
+    }));
+    assert!(result.is_err());
+
+    // Verify user still doesn't have admin role
+    assert!(!client.has_role(&user, &Role::Admin));
+}
+
+#[test]
+fn test_admin_transition_security() {
+    let (env, contract_id, admin1) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let admin2 = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Verify admin1 is admin
+    assert_eq!(client.get_admin(), admin1);
+    assert!(client.has_role(&admin1, &Role::Admin));
+
+    // Transfer admin to admin2
+    client.transfer_admin(&admin1, &admin2);
+
+    // Verify admin2 is now admin
+    assert_eq!(client.get_admin(), admin2);
+    assert!(client.has_role(&admin2, &Role::Admin));
+    assert!(!client.has_role(&admin1, &Role::Admin));
+
+    // admin1 cannot perform admin operations anymore
+    let user = Address::generate(&env);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.grant_role(&admin1, &user, &Role::User);
+    }));
+    assert!(result.is_err());
+
+    // admin2 can perform admin operations
+    let user2 = Address::generate(&env);
+    client.grant_role(&admin2, &user2, &Role::User);
+    assert!(client.has_role(&user2, &Role::User));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_previous_admin_cannot_grant_roles_after_transfer() {
+    let (env, contract_id, admin1) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let admin2 = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Transfer admin
+    client.transfer_admin(&admin1, &admin2);
+
+    // Previous admin tries to grant role - should fail
+    client.grant_role(&admin1, &user, &Role::User);
+}
+
+#[test]
+fn test_only_admin_can_transfer_admin() {
+    let (env, contract_id, admin) = create_contract();
+    let client = AccessControlContractClient::new(&env, &contract_id);
+
+    let operator = Address::generate(&env);
+    let new_target = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    // Grant operator role
+    client.grant_role(&admin, &operator, &Role::Operator);
+
+    // Operator cannot transfer admin
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer_admin(&operator, &new_target);
+    }));
+    assert!(result.is_err());
+
+    // Admin can transfer admin
+    client.transfer_admin(&admin, &new_target);
+    assert_eq!(client.get_admin(), new_target);
 }

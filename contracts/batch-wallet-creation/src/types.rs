@@ -64,6 +64,14 @@ pub struct Wallet {
     pub created_at: u64,
 }
 
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct WalletCreatedEvent {
+    pub owner: Address,
+    pub wallet_id: u64,
+    pub created_at: u64,
+}
+
 pub struct WalletEvents;
 
 impl WalletEvents {
@@ -72,9 +80,9 @@ impl WalletEvents {
         env.events().publish(topics, (batch_id, request_count));
     }
 
-    pub fn wallet_created(env: &Env, batch_id: u64, owner: &Address, wallet_id: u64) {
+    pub fn wallet_created(env: &Env, batch_id: u64, event: &WalletCreatedEvent) {
         let topics = (symbol_short!("wallet"), symbol_short!("created"), batch_id);
-        env.events().publish(topics, (owner.clone(), wallet_id));
+        env.events().publish(topics, event.clone());
     }
 
     pub fn wallet_creation_failure(env: &Env, batch_id: u64, owner: &Address, error_code: u32) {

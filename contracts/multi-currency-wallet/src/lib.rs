@@ -147,6 +147,9 @@ impl MultiCurrencyWalletContract {
 
         // Process each request
         for request in requests.iter() {
+            let mut request = request;
+            request.currency = shared::assets::normalize_asset_symbol(&env, &request.currency);
+
             // Validate the request
             match validate_balance_request(&request) {
                 Ok(()) => {
@@ -298,9 +301,10 @@ impl MultiCurrencyWalletContract {
     /// # Returns
     /// * `i128` - The balance (0 if not found)
     pub fn get_balance(env: Env, user: Address, currency: Symbol) -> i128 {
+        let normalized_currency = shared::assets::normalize_asset_symbol(&env, &currency);
         env.storage()
             .persistent()
-            .get(&DataKey::Balance(user, currency))
+            .get(&DataKey::Balance(user, normalized_currency))
             .map(|b: CurrencyBalance| b.balance)
             .unwrap_or(0)
     }
@@ -319,9 +323,10 @@ impl MultiCurrencyWalletContract {
         user: Address,
         currency: Symbol,
     ) -> Option<CurrencyBalance> {
+        let normalized_currency = shared::assets::normalize_asset_symbol(&env, &currency);
         env.storage()
             .persistent()
-            .get(&DataKey::Balance(user, currency))
+            .get(&DataKey::Balance(user, normalized_currency))
     }
 
     /// Returns the admin address.

@@ -9,6 +9,7 @@ pub enum DataKey {
     Admin,
     Balance(Address),
 }
+//  AlreadyInitialized = 1,
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]

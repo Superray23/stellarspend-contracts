@@ -205,8 +205,14 @@ fn test_validate_fee_bps_valid() {
 fn test_validate_fee_bps_invalid() {
     use crate::validation::validate_fee_bps;
     use crate::FeeContractError;
-    assert_eq!(validate_fee_bps(10001), Err(FeeContractError::InvalidConfig));
-    assert_eq!(validate_fee_bps(99999), Err(FeeContractError::InvalidConfig));
+    assert_eq!(
+        validate_fee_bps(10001),
+        Err(FeeContractError::InvalidConfig)
+    );
+    assert_eq!(
+        validate_fee_bps(99999),
+        Err(FeeContractError::InvalidConfig)
+    );
 }
 
 #[test]
@@ -222,5 +228,53 @@ fn test_validate_min_fee_invalid() {
     use crate::validation::validate_min_fee;
     use crate::FeeContractError;
     assert_eq!(validate_min_fee(-1), Err(FeeContractError::InvalidConfig));
-    assert_eq!(validate_min_fee(-1000), Err(FeeContractError::InvalidConfig));
+    assert_eq!(
+        validate_min_fee(-1000),
+        Err(FeeContractError::InvalidConfig)
+    );
+}
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #4)")]
+fn test_collect_fee_zero_amount_panics() {
+    let (env, _admin, client) = setup();
+    let payer = Address::generate(&env);
+    client.collect_fee(&payer, &0);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #4)")]
+fn test_collect_fee_negative_amount_panics() {
+    let (env, _admin, client) = setup();
+    let payer = Address::generate(&env);
+    client.collect_fee(&payer, &-100);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #1)")]
+fn test_collect_fee_uninitialized_panics() {
+    let env = Env::default();
+    let contract_id = env.register(FeeContract, ());
+    let client = FeeContractClient::new(&env, &contract_id);
+    let payer = Address::generate(&env);
+    client.collect_fee(&payer, &100);
+}
+
+#[test]
+fn test_getters_return_defaults_when_uninitialized() {
+    let env = Env::default();
+    let contract_id = env.register(FeeContract, ());
+    let client = FeeContractClient::new(&env, &contract_id);
+
+    assert_eq!(client.get_fee_bps(), DEFAULT_FEE_BPS);
+    assert_eq!(client.get_min_fee(), DEFAULT_MIN_FEE);
+    assert_eq!(client.get_max_fee(), 1_000_000); // DEFAULT_MAX_FEE
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #4)")]
+fn test_collect_fee_batch_zero_amount_panics() {
+    let (env, _admin, client) = setup();
+    let payer = Address::generate(&env);
+    let amounts = soroban_sdk::vec![&env, 100, 0, 200];
+    client.collect_fee_batch(&payer, &amounts);
 }

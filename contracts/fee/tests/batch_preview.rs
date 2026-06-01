@@ -44,3 +44,18 @@ fn preview_accepts_edge_at_min_and_large_values() {
     let total = ctx.client.preview_batch_fee(&ctx.payer, &batch);
     assert_eq!(total, 1 + 2 + 1_000_000_000_000i128);
 }
+
+#[test]
+#[should_panic]
+fn set_max_fee_rejects_negative_value() {
+    let ctx = setup();
+    ctx.client.set_max_fee(&ctx.admin, &-1i128);
+}
+
+#[test]
+#[should_panic]
+fn set_max_fee_rejects_value_below_min_fee() {
+    let ctx = setup();
+    ctx.client.set_min_fee(&ctx.admin, &100i128);
+    ctx.client.set_max_fee(&ctx.admin, &50i128);
+}

@@ -76,4 +76,14 @@ pub fn admin_remove_user_fee_override(
         ("fee_override_removed", user),
         (),
     );
+} // ========== USER PROFILE FUNCTIONS (Issues #324 & #323) ==========
+
+pub fn set_user_profile(env: Env, user: Address, data: String) {
+    user.require_auth();
+    storage::set_user_profile(&env, user.clone(), data.clone());
+    env.events().publish(("user_profile_set", user), data);
+}
+
+pub fn get_user_profile(env: Env, user: Address) -> String {
+    storage::get_user_profile(&env, user)
 }

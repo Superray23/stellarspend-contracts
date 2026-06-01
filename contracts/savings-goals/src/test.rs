@@ -3,7 +3,7 @@
 #![cfg(test)]
 
 use crate::{SavingsGoalsContract, SavingsGoalsContractClient};
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec};
 
 use crate::types::{
     ErrorCode, GoalResult, MilestoneAchievementRequest, MilestoneResult, SavingsGoalRequest,
@@ -37,6 +37,8 @@ fn create_valid_request(
         target_amount: amount,
         deadline: current_ledger + 1000,
         initial_contribution: amount / 10, // 10% initial contribution
+        lock_duration_seconds: 0,
+        expiration_seconds: 0,
     }
 }
 
@@ -62,52 +64,40 @@ fn test_initialize_twice_fails() {
 }
 
 #[test]
+fn test_auto_milestone_events() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "auto_milestone"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 25_000_000,
+        lock_duration_seconds: 0,
+        expiration_seconds: 0,
+    });
+    let result = client.batch_set_savings_goals(&admin, &requests);
+    assert_eq!(result.successful, 1);
+
+    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000);
+
+    let triggered = client.get_triggered_milestone_percents(&1);
+    assert_eq!(triggered.len(), 4);
+    assert!(triggered.contains(&25));
+    assert!(triggered.contains(&50));
+    assert!(triggered.contains(&75));
+    assert!(triggered.contains(&100));
+
+    client.check_and_emit_milestones(&1);
+    let triggered_after = client.get_triggered_milestone_percents(&1);
+    assert_eq!(triggered_after.len(), 4);
+}
+
+#[test]
 fn test_batch_set_savings_goals_single_user() {
-    #[test]
-    fn test_auto_milestone_events() {
-        let (env, admin, client) = setup_test_contract();
-        let user = Address::generate(&env);
-        let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
-        // 25% initial contribution
-        requests.push_back(SavingsGoalRequest {
-            user: user.clone(),
-            goal_name: Symbol::new(&env, "auto_milestone"),
-            target_amount: 100_000_000,
-            deadline: env.ledger().sequence() as u64 + 1000,
-            initial_contribution: 25_000_000,
-        });
-        let result = client.batch_set_savings_goals(&admin, &requests);
-        assert_eq!(result.successful, 1);
-        // Increase progress to 50%, 75%, 100% and check events
-        let mut goal = client.get_goal(&1).unwrap();
-        goal.current_amount = 50_000_000;
-        env.storage()
-            .persistent()
-            .set(&crate::types::DataKey::Goal(1), &goal);
-        crate::SavingsGoalsContract::check_and_emit_milestones(&env, 1);
-        goal.current_amount = 75_000_000;
-        env.storage()
-            .persistent()
-            .set(&crate::types::DataKey::Goal(1), &goal);
-        crate::SavingsGoalsContract::check_and_emit_milestones(&env, 1);
-        goal.current_amount = 100_000_000;
-        env.storage()
-            .persistent()
-            .set(&crate::types::DataKey::Goal(1), &goal);
-        crate::SavingsGoalsContract::check_and_emit_milestones(&env, 1);
-        // Check duplicate prevention: call again, no duplicate events
-        crate::SavingsGoalsContract::check_and_emit_milestones(&env, 1);
-        let triggered: Vec<u32> = env
-            .storage()
-            .persistent()
-            .get(&crate::types::DataKey::GoalMilestonesPercent(1))
-            .unwrap();
-        assert_eq!(triggered.len(), 4);
-        assert!(triggered.contains(&25));
-        assert!(triggered.contains(&50));
-        assert!(triggered.contains(&75));
-        assert!(triggered.contains(&100));
-    }
     let (env, admin, client) = setup_test_contract();
     let user = Address::generate(&env);
 
@@ -297,6 +287,36 @@ fn test_get_goal() {
 }
 
 #[test]
+fn test_get_goal_progress_and_completion() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(&env, &user, "vacation", 100_000_000));
+
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let progress = client.get_goal_progress(&1).unwrap();
+    assert_eq!(progress.goal_id, 1);
+    assert_eq!(progress.current_amount, 10_000_000);
+    assert_eq!(progress.target_amount, 100_000_000);
+    assert_eq!(progress.progress_percentage, 10);
+    assert_eq!(progress.is_complete, false);
+
+    client.test_set_goal_current_amount(&1, &100_000_000);
+
+    let completed_progress = client.get_goal_progress(&1).unwrap();
+    assert_eq!(completed_progress.goal_id, 1);
+    assert_eq!(completed_progress.current_amount, 100_000_000);
+    assert_eq!(completed_progress.target_amount, 100_000_000);
+    assert_eq!(completed_progress.progress_percentage, 100);
+    assert_eq!(completed_progress.is_complete, true);
+
+    let completed_goal = client.get_goal(&1).unwrap();
+    assert_eq!(completed_goal.is_complete, true);
+}
+
+#[test]
 fn test_get_user_goals() {
     let (env, admin, client) = setup_test_contract();
     let user = Address::generate(&env);
@@ -442,6 +462,82 @@ fn test_zero_initial_contribution() {
 
     let goal = client.get_goal(&1).unwrap();
     assert_eq!(goal.current_amount, 0);
+}
+
+#[test]
+fn test_duplicate_goal_name_same_user() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(&env, &user, "vacation", 100_000_000));
+    requests.push_back(create_valid_request(&env, &user, "vacation", 200_000_000)); // Duplicate name
+
+    let result = client.batch_set_savings_goals(&admin, &requests);
+
+    assert_eq!(result.total_requests, 2);
+    assert_eq!(result.successful, 1); // First one succeeds
+    assert_eq!(result.failed, 1); // Second one fails (duplicate name)
+
+    // Verify first succeeded
+    match &result.results.get(0).unwrap() {
+        GoalResult::Success(_) => {}
+        GoalResult::Failure(_, _) => panic!("Expected first request to succeed"),
+    }
+
+    // Verify second failed with duplicate error
+    match &result.results.get(1).unwrap() {
+        GoalResult::Success(_) => panic!("Expected second request to fail"),
+        GoalResult::Failure(_, error_code) => {
+            assert_eq!(*error_code, ErrorCode::DUPLICATE_GOAL_NAME);
+        }
+    }
+
+    assert_eq!(client.get_total_goals_created(), 1);
+}
+
+#[test]
+fn test_same_goal_name_different_users() {
+    let (env, admin, client) = setup_test_contract();
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(&env, &user1, "vacation", 100_000_000));
+    requests.push_back(create_valid_request(&env, &user2, "vacation", 200_000_000)); // Same name, different user
+
+    let result = client.batch_set_savings_goals(&admin, &requests);
+
+    assert_eq!(result.total_requests, 2);
+    assert_eq!(result.successful, 2); // Both should succeed
+    assert_eq!(result.failed, 0);
+    assert_eq!(client.get_total_goals_created(), 2);
+}
+
+#[test]
+fn test_duplicate_goal_name_across_batches() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    // First batch creates "vacation"
+    let mut requests1: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests1.push_back(create_valid_request(&env, &user, "vacation", 100_000_000));
+    let result1 = client.batch_set_savings_goals(&admin, &requests1);
+    assert_eq!(result1.successful, 1);
+
+    // Second batch tries to create "vacation" again for same user
+    let mut requests2: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests2.push_back(create_valid_request(&env, &user, "vacation", 200_000_000));
+    let result2 = client.batch_set_savings_goals(&admin, &requests2);
+    assert_eq!(result2.successful, 0);
+    assert_eq!(result2.failed, 1);
+
+    match &result2.results.get(0).unwrap() {
+        GoalResult::Failure(_, error_code) => {
+            assert_eq!(*error_code, ErrorCode::DUPLICATE_GOAL_NAME);
+        }
+        GoalResult::Success(_) => panic!("Expected duplicate to fail"),
+    }
 }
 
 #[test]
@@ -620,7 +716,7 @@ fn test_batch_mark_single_milestone() {
     // Update goal's current_amount to meet milestone
     let mut goal = client.get_goal(&1).unwrap();
     goal.current_amount = 25_000_000; // 25% of 100_000_000
-    crate::SavingsGoalsContract::test_set_goal_current_amount(env.clone(), 1, 25_000_000);
+    client.test_set_goal_current_amount(&1, &25_000_000);
 
     // Mark a milestone
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
@@ -653,7 +749,7 @@ fn test_batch_mark_multiple_milestones() {
     // Update goal's current_amount to meet all milestones
     let mut goal = client.get_goal(&1).unwrap();
     goal.current_amount = 75_000_000; // 75% of 100_000_000
-    crate::SavingsGoalsContract::test_set_goal_current_amount(env.clone(), 1, 75_000_000);
+    client.test_set_goal_current_amount(&1, &75_000_000);
 
     // Mark multiple milestones in one batch
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
@@ -823,6 +919,9 @@ fn test_milestone_duplicate_percentage() {
     goal_requests.push_back(create_valid_request(&env, &user, "savings", 100_000_000));
     client.batch_set_savings_goals(&admin, &goal_requests);
 
+    // Update current amount so the 50% milestone is achievable.
+    client.test_set_goal_current_amount(&1, &50_000_000);
+
     // Mark first milestone
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
     milestone_requests.push_back(MilestoneAchievementRequest {
@@ -867,7 +966,7 @@ fn test_milestone_partial_failures() {
     // Update goal's current_amount to meet valid milestones
     let mut goal = client.get_goal(&1).unwrap();
     goal.current_amount = 75_000_000; // 75% of 100_000_000
-    crate::SavingsGoalsContract::test_set_goal_current_amount(env.clone(), 1, 75_000_000);
+    client.test_set_goal_current_amount(&1, &75_000_000);
 
     // Create a batch with mixed valid and invalid requests
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
@@ -929,7 +1028,7 @@ fn test_milestone_retrieve_milestone() {
     // Update goal's current_amount to meet milestone
     let mut goal = client.get_goal(&1).unwrap();
     goal.current_amount = 50_000_000; // 50% of 100_000_000
-    crate::SavingsGoalsContract::test_set_goal_current_amount(env.clone(), 1, 50_000_000);
+    client.test_set_goal_current_amount(&1, &50_000_000);
 
     // Mark a milestone
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
@@ -973,7 +1072,7 @@ fn test_milestone_batch_too_large() {
     // Update goal's current_amount to meet milestone
     let mut goal = client.get_goal(&1).unwrap();
     goal.current_amount = 50_000_000; // 50% of 100_000_000
-    crate::SavingsGoalsContract::test_set_goal_current_amount(env.clone(), 1, 50_000_000);
+    client.test_set_goal_current_amount(&1, &50_000_000);
 
     // Create batch exceeding MAX_BATCH_SIZE
     let mut milestone_requests: Vec<MilestoneAchievementRequest> = Vec::new(&env);
@@ -987,4 +1086,178 @@ fn test_milestone_batch_too_large() {
     }
 
     client.batch_mark_milestones(&user, &milestone_requests);
+}
+
+// ==================== Lock Duration & Withdrawal Tests ====================
+
+#[test]
+fn test_locked_goal_rejects_withdrawal() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "locked"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 50_000_000,
+        lock_duration_seconds: 86_400,
+        expiration_seconds: 0,
+    });
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let goal = client.get_goal(&1).unwrap();
+    assert!(goal.unlock_at > 0);
+    assert!(client.is_goal_locked(&1));
+
+    let result = client.try_withdraw_from_goal(&user, &1, &10_000_000);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unlocked_goal_allows_withdrawal() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "unlocked"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 50_000_000,
+        lock_duration_seconds: 0,
+        expiration_seconds: 0,
+    });
+    client.batch_set_savings_goals(&admin, &requests);
+
+    assert!(!client.is_goal_locked(&1));
+    let remaining = client.withdraw_from_goal(&user, &1, &10_000_000);
+    assert_eq!(remaining, 40_000_000);
+}
+
+#[test]
+fn test_withdrawal_allowed_after_lock_expires() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "timed_lock"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 50_000_000,
+        lock_duration_seconds: 3_600,
+        expiration_seconds: 0,
+    });
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let goal = client.get_goal(&1).unwrap();
+    env.ledger().set_timestamp(goal.unlock_at + 1);
+
+    assert!(!client.is_goal_locked(&1));
+    let remaining = client.withdraw_from_goal(&user, &1, &10_000_000);
+    assert_eq!(remaining, 40_000_000);
+}
+
+#[test]
+fn test_contribute_emits_milestone_events() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    let mut request = create_valid_request(&env, &user, "savings", 100_000_000);
+    request.initial_contribution = 100_000_000; // Complete from start
+    requests.push_back(request);
+    client.batch_set_savings_goals(&admin, &requests);
+
+    // Goal should be complete
+    let progress = client.get_goal_progress(&1).unwrap();
+    assert_eq!(progress.is_complete, true);
+
+    // Verify goal_completed event was emitted
+    let events = env.events().all();
+    let completed_event = events.iter().find(|e| {
+        if e.1.len() < 2 {
+            return false;
+        }
+        if let Ok(topic0) = soroban_sdk::Symbol::try_from_val(&env, e.1.get(0).unwrap()) {
+            if let Ok(topic1) = soroban_sdk::Symbol::try_from_val(&env, e.1.get(1).unwrap()) {
+                return topic0 == soroban_sdk::symbol_short!("goal")
+                    && topic1 == soroban_sdk::symbol_short!("completed");
+            }
+        }
+        false
+    });
+    assert!(completed_event.is_some());
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "milestones"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 0,
+        lock_duration_seconds: 0,
+        expiration_seconds: 0,
+    });
+    client.batch_set_savings_goals(&admin, &requests);
+
+    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000);
+
+    let triggered = client.get_triggered_milestone_percents(&1);
+    assert_eq!(triggered.len(), 4);
+    assert!(triggered.contains(&25));
+    assert!(triggered.contains(&50));
+    assert!(triggered.contains(&75));
+    assert!(triggered.contains(&100));
+}
+
+#[test]
+fn test_clone_savings_goal() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(SavingsGoalRequest {
+        user: user.clone(),
+        goal_name: Symbol::new(&env, "original"),
+        target_amount: 100_000_000,
+        deadline: env.ledger().sequence() as u64 + 1000,
+        initial_contribution: 50_000_000,
+        lock_duration_seconds: 3600,
+        expiration_seconds: 0,
+    });
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let cloned_name = Symbol::new(&env, "cloned");
+    let cloned_id = client.clone_savings_goal(&user, &1, &cloned_name);
+
+    assert_eq!(cloned_id, 2);
+
+    let cloned_goal = client.get_goal(&cloned_id).unwrap();
+    assert_eq!(cloned_goal.goal_name, cloned_name);
+    assert_eq!(cloned_goal.target_amount, 100_000_000);
+    assert_eq!(cloned_goal.current_amount, 0); // Balance reset
+    assert_eq!(cloned_goal.user, user);
+    assert_eq!(cloned_goal.is_complete, false);
+    assert!(cloned_goal.unlock_at > cloned_goal.created_at); // Lock inherited
+}
+
+#[test]
+#[should_panic]
+fn test_clone_savings_goal_unauthorized() {
+    let (env, admin, client) = setup_test_contract();
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    requests.push_back(create_valid_request(&env, &user1, "original", 100_000_000));
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let cloned_name = Symbol::new(&env, "cloned");
+    client.clone_savings_goal(&user2, &1, &cloned_name); // user2 tries to clone user1's goal
 }

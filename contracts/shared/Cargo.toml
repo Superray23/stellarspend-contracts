@@ -9,3 +9,9 @@ description = "Shared validation helpers for StellarSpend contracts"
 [lib]
 crate-type = ["rlib"]
 doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

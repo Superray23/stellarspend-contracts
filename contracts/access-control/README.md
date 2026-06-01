@@ -56,6 +56,18 @@ Initialize the contract with an admin address. Can only be called once.
 pub fn grant_role(env: Env, caller: Address, user: Address, role: Role)
 ```
 
+```rust
+pub fn get_user_roles(env: Env, user: Address) -> Map<Role, bool>
+```
+
+Get all roles assigned to a user. Returns an empty `Map` for users with no assigned roles.
+
+```rust
+pub fn has_any_role(env: Env, user: Address) -> bool
+```
+
+Returns `true` when the user has at least one assigned role, otherwise `false`.
+
 Grant a role to a user. Only callable by admin.
 
 ```rust
@@ -97,6 +109,71 @@ pub fn get_total_role_assignments(env: Env) -> u64
 ```
 
 Get the total number of active role assignments.
+
+## Admin-Only Functions
+
+The following functions require the caller to have the **Admin role** and must provide proper authorization:
+
+| Function | Description | Authorization Required |
+|----------|-------------|----------------------|
+| `grant_role()` | Grant a role to a user | ✓ Admin role required |
+| `revoke_role()` | Revoke a role from a user | ✓ Admin role required |
+| `transfer_admin()` | Transfer admin privileges to another address | ✓ Admin role required |
+| `initialize()` | Initialize the contract with an admin | ✓ Caller must provide auth as admin |
+
+### Authorization Behavior
+
+All admin-only functions enforce strict role-based access control:
+
+- **Unauthorized callers** will receive an `Unauthorized` error (Error code 2)
+- **Non-admin users** cannot grant, revoke, or transfer admin roles
+- **Privilege escalation is prevented**: Users cannot elevate their own roles
+- **Admin separation**: Previous admin loses admin privileges after transfer
+- **Self-protection**: Admins cannot revoke their own admin role
+
+## Security Considerations
+
+### Privilege Escalation Prevention
+
+- Non-admin users cannot grant roles to themselves or others
+- Only the current admin can transfer admin privileges
+- Role checks are enforced consistently across all privileged functions
+
+### Admin Transfer Safety
+
+- When admin is transferred, the previous admin loses all admin privileges
+- The new admin must be explicitly designated
+- Both addresses must provide authentication
+
+### Unauthorized Call Rejection
+
+All unauthorized operations are rejected with a clear error:
+- Error Code: 2 (Unauthorized)
+- Any caller attempting privileged operations without admin role will fail
+- All unauthorized attempts are logged as events for audit purposes
+
+## Events
+
+The following events are emitted:
+
+| Event | When | Details |
+|-------|------|---------|
+| `initialized` | Contract initialized | Admin address |
+| `role_granted` | Role assigned to user | User address, Role |
+| `role_revoked` | Role removed from user | User address, Role |
+| `admin_transferred` | Admin privileges transferred | Old admin, New admin |
+
+## Testing
+
+The contract includes comprehensive test coverage for:
+
+- Role management operations
+- Admin enforcement and authorization
+- Privilege escalation prevention
+- Admin transfer security
+- Event emission verification
+- Unauthorized operation rejection
+
 
 ### Helper Functions
 

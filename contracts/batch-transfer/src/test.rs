@@ -180,6 +180,47 @@ fn test_batch_transfer_with_invalid_amount() {
 }
 
 #[test]
+fn test_batch_transfer_rejects_duplicate_recipients() {
+    let (env, admin, token, token_client, client) = setup_test_env();
+
+    let recipient = Address::generate(&env);
+    let amount: i128 = 10_000_000;
+    let token_admin_client = token::StellarAssetClient::new(&env, &token);
+    token_admin_client.mint(&admin, &(amount * 2));
+
+    let mut transfers: Vec<TransferRequest> = Vec::new(&env);
+    transfers.push_back(create_transfer_request(&env, recipient.clone(), amount));
+    transfers.push_back(create_transfer_request(&env, recipient.clone(), amount));
+
+    let result = client.batch_transfer(&admin, &token, &transfers);
+
+    assert_eq!(result.total_requests, 2);
+    assert_eq!(result.successful, 1);
+    assert_eq!(result.failed, 1);
+    assert_eq!(result.total_transferred, amount);
+
+    match result.results.get(0).unwrap() {
+        TransferResult::Success(recv, transferred_amount) => {
+            assert_eq!(recv.clone(), recipient);
+            assert_eq!(transferred_amount.clone(), amount);
+        }
+        _ => panic!("Expected first transfer to succeed"),
+    }
+
+    match result.results.get(1).unwrap() {
+        TransferResult::Failure(recv, failed_amount, error_code) => {
+            assert_eq!(recv.clone(), recipient);
+            assert_eq!(failed_amount.clone(), amount);
+            assert_eq!(error_code, 3); // Duplicate recipient
+        }
+        _ => panic!("Expected duplicate recipient to fail"),
+    }
+
+    assert_eq!(token_client.balance(&recipient), amount);
+    assert_eq!(token_client.balance(&admin), amount);
+}
+
+#[test]
 fn test_batch_transfer_with_insufficient_balance() {
     let (env, admin, token, _token_client, client) = setup_test_env();
 
@@ -209,7 +250,7 @@ fn test_batch_transfer_with_insufficient_balance() {
 
 #[test]
 fn test_batch_transfer_partial_failures() {
-    let (env, admin, token, _token_client, client) = setup_test_env();
+    let (env, admin, token, token_client, client) = setup_test_env();
 
     let recipient1 = Address::generate(&env);
     let recipient2 = Address::generate(&env);
@@ -241,8 +282,16 @@ fn test_batch_transfer_partial_failures() {
     assert_eq!(result.failed, 2);
     assert_eq!(result.total_transferred, 30_000_000);
 
-    // Successful transfers would update balances, failed ones would not
-    // Balance verification would be done in integration tests
+    // Verify final token balances for the recipients and admin.
+    assert_eq!(token_client.balance(&recipient1), 10_000_000);
+    assert_eq!(token_client.balance(&recipient2), 0);
+    assert_eq!(token_client.balance(&recipient3), 20_000_000);
+    assert_eq!(token_client.balance(&recipient4), 0);
+    assert_eq!(token_client.balance(&admin), 0);
+
+    // Confirm expected event emission for the batch
+    let events = env.events().all();
+    assert!(events.len() >= 4);
 }
 
 #[test]

@@ -200,12 +200,23 @@ impl AccessControlContract {
         }
     }
 
-    /// Get all roles for a user
+    /// Get all roles for a user.
+    ///
+    /// Returns an empty `Map` for users with no assigned roles.
     pub fn get_user_roles(env: Env, user: Address) -> Map<Role, bool> {
         env.storage()
             .instance()
             .get(&DataKey::UserRoles(user))
             .unwrap_or(Map::new(&env))
+    }
+
+    /// Return true if the user has any assigned role.
+    pub fn has_any_role(env: Env, user: Address) -> bool {
+        let roles = Self::get_user_roles(env, user);
+        roles.get(Role::Admin).unwrap_or(false)
+            || roles.get(Role::User).unwrap_or(false)
+            || roles.get(Role::Operator).unwrap_or(false)
+            || roles.get(Role::Auditor).unwrap_or(false)
     }
 
     /// Transfer admin role to a new address (current admin only)

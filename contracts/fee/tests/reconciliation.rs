@@ -1,8 +1,8 @@
 mod support;
 
 use soroban_sdk::Address;
-use support::setup;
 use soroban_sdk::{testutils::Address as _, Address};
+use support::setup;
 
 #[test]
 fn reconciliation_balanced_after_init() {
@@ -175,3 +175,4 @@ fn reconciliation_result_fields_correct() {
     assert_eq!(result.discrepancy, 0);
     assert!(result.is_reconciled);
 }
+

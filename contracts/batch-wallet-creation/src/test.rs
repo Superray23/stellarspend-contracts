@@ -7,8 +7,8 @@ use crate::{
     WalletCreateRequest, WalletCreateResult, WalletRecoveryRequest, WalletRecoveryResult,
 };
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger},
-    Address, Env, Vec,
+    symbol_short, testutils::{Address as _, Events as _, Ledger},
+    Address, Env, Symbol, TryFromVal, Vec,
 };
 
 /// Creates a test environment with the contract deployed and initialized.
@@ -170,6 +170,15 @@ fn test_batch_create_wallets_partial_failures() {
     assert_eq!(wallet3.id, 3); // IDs continue from previous batch
 }
 
+fn event_has_topics(env: &Env, event: &(soroban_sdk::Val, Vec<soroban_sdk::Val>), topic0: Symbol, topic1: Symbol) -> bool {
+    if event.1.len() < 2 {
+        return false;
+    }
+    let event_topic0 = Symbol::try_from_val(env, &event.1.get(0).unwrap());
+    let event_topic1 = Symbol::try_from_val(env, &event.1.get(1).unwrap());
+    matches!((event_topic0, event_topic1), (Ok(t0), Ok(t1)) if t0 == topic0 && t1 == topic1)
+}
+
 #[test]
 fn test_batch_create_wallets_events_emitted() {
     let (env, admin, client) = setup_test_env();
@@ -184,8 +193,40 @@ fn test_batch_create_wallets_events_emitted() {
     client.batch_create_wallets(&admin, &requests);
 
     let events = env.events().all();
-    // Should have: batch_started, wallet_created (2), batch_completed
     assert!(events.len() >= 4);
+    let wallet_created_events = events.iter().filter(|event| {
+        event_has_topics(&env, event, symbol_short!("wallet"), symbol_short!("created"))
+    }).count();
+    assert_eq!(wallet_created_events, 2);
+}
+
+#[test]
+fn test_failed_wallet_creation_does_not_emit_success_event() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner1 = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+
+    let mut requests1: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests1.push_back(create_wallet_request(&env, owner1.clone()));
+    client.batch_create_wallets(&admin, &requests1);
+
+    let mut requests2: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests2.push_back(create_wallet_request(&env, owner1.clone())); // duplicate -> failure
+    requests2.push_back(create_wallet_request(&env, owner2.clone())); // success
+
+    client.batch_create_wallets(&admin, &requests2);
+
+    let events = env.events().all();
+    let created_events = events.iter().filter(|event| {
+        event_has_topics(&env, event, symbol_short!("wallet"), symbol_short!("created"))
+    }).count();
+    let failure_events = events.iter().filter(|event| {
+        event_has_topics(&env, event, symbol_short!("wallet"), symbol_short!("failure"))
+    }).count();
+
+    assert_eq!(created_events, 2); // one from first batch, one from second batch success
+    assert_eq!(failure_events, 1);
 }
 
 #[test]
@@ -471,4 +512,164 @@ fn test_batch_recover_wallets_unauthorized() {
 
     let unauthorized = Address::generate(&env);
     client.batch_recover_wallets(&unauthorized, &recovery_requests);
+}
+
+// ─── Duplicate Wallet Detection Tests ──────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_batch_create_wallets_duplicate_in_batch() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+
+    let mut requests: Vec<WalletCreateRequest> = Vec::new(&env);
+    // Add duplicate requests for same owner within single batch
+    requests.push_back(create_wallet_request(&env, owner.clone()));
+    requests.push_back(create_wallet_request(&env, owner2.clone()));
+    requests.push_back(create_wallet_request(&env, owner.clone())); // Duplicate!
+
+    // This should panic with DuplicateWallet error
+    client.batch_create_wallets(&admin, &requests);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_batch_create_wallets_multiple_duplicates_in_batch() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner1 = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+    let owner3 = Address::generate(&env);
+
+    let mut requests: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests.push_back(create_wallet_request(&env, owner1.clone()));
+    requests.push_back(create_wallet_request(&env, owner2.clone()));
+    requests.push_back(create_wallet_request(&env, owner1.clone())); // Duplicate!
+    requests.push_back(create_wallet_request(&env, owner3.clone()));
+    requests.push_back(create_wallet_request(&env, owner2.clone())); // Another duplicate!
+
+    // This should panic with DuplicateWallet error
+    client.batch_create_wallets(&admin, &requests);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_batch_create_wallets_consecutive_duplicates() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner = Address::generate(&env);
+
+    let mut requests: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests.push_back(create_wallet_request(&env, owner.clone()));
+    requests.push_back(create_wallet_request(&env, owner.clone())); // Duplicate!
+    requests.push_back(create_wallet_request(&env, owner.clone())); // Another duplicate!
+
+    // This should panic with DuplicateWallet error
+    client.batch_create_wallets(&admin, &requests);
+}
+
+#[test]
+fn test_batch_create_wallets_no_duplicates_succeeds() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner1 = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+    let owner3 = Address::generate(&env);
+
+    let mut requests: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests.push_back(create_wallet_request(&env, owner1.clone()));
+    requests.push_back(create_wallet_request(&env, owner2.clone()));
+    requests.push_back(create_wallet_request(&env, owner3.clone()));
+
+    // This should succeed (no duplicates)
+    let result = client.batch_create_wallets(&admin, &requests);
+
+    assert_eq!(result.total_requests, 3);
+    assert_eq!(result.successful, 3);
+    assert_eq!(result.failed, 0);
+}
+
+#[test]
+fn test_batch_create_wallets_duplicate_event_emitted() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+
+    let mut requests: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests.push_back(create_wallet_request(&env, owner.clone()));
+    requests.push_back(create_wallet_request(&env, owner2.clone()));
+    requests.push_back(create_wallet_request(&env, owner.clone())); // Duplicate
+
+    // Attempt batch create - should fail with duplicate error
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.batch_create_wallets(&admin, &requests);
+    }));
+
+    // Verify panic occurred
+    assert!(result.is_err());
+
+    // Verify duplicate event was published before panic
+    let events = env.events().all();
+    let mut duplicate_event_found = false;
+    for (_, topics, _) in events.iter() {
+        let topic_vec = topics.clone();
+        if topic_vec.len() >= 2 {
+            let topic1: soroban_sdk::Symbol =
+                topic_vec.get(0).unwrap().into_val(&env).try_into().ok();
+            let topic2: soroban_sdk::Symbol =
+                topic_vec.get(1).unwrap().into_val(&env).try_into().ok();
+            if topic1 == Some(soroban_sdk::Symbol::new(&env, "wallet"))
+                && topic2 == Some(soroban_sdk::Symbol::new(&env, "duplicate"))
+            {
+                duplicate_event_found = true;
+                break;
+            }
+        }
+    }
+    assert!(duplicate_event_found, "Duplicate event should be emitted");
+}
+
+#[test]
+fn test_batch_create_wallets_duplicate_error_identifies_entry() {
+    let (env, admin, client) = setup_test_env();
+
+    let owner = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+    let owner3 = Address::generate(&env);
+
+    // First batch - success
+    let mut requests1: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests1.push_back(create_wallet_request(&env, owner.clone()));
+    requests1.push_back(create_wallet_request(&env, owner2.clone()));
+    client.batch_create_wallets(&admin, &requests1);
+
+    // Second batch - with duplicate from first batch
+    let mut requests2: Vec<WalletCreateRequest> = Vec::new(&env);
+    requests2.push_back(create_wallet_request(&env, owner.clone())); // Existed before
+    requests2.push_back(create_wallet_request(&env, owner3.clone())); // New
+
+    let result = client.batch_create_wallets(&admin, &requests2);
+
+    // Should process individually since duplicates are within-batch check
+    // Only existing wallets should fail, not in-batch duplicates
+    assert_eq!(result.total_requests, 2);
+    assert_eq!(result.successful, 1);
+    assert_eq!(result.failed, 1);
+
+    match result.results.get(0).unwrap() {
+        WalletCreateResult::Failure(addr, _) => {
+            assert_eq!(addr, owner); // First request failed (already exists)
+        }
+        _ => panic!("Expected failure for existing wallet"),
+    }
+
+    match result.results.get(1).unwrap() {
+        WalletCreateResult::Success(addr) => {
+            assert_eq!(addr, owner3); // New wallet created
+        }
+        _ => panic!("Expected success for new wallet"),
+    }
 }

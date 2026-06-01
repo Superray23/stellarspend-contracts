@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Symbol, Env};
+use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,5 +16,6 @@ pub fn emit_spending_updated(env: &Env, user: Address, category: Symbol, amount:
         amount,
         timestamp: env.ledger().timestamp(),
     };
-    env.events().publish((Symbol::new(env, "spending_updated"),), event);
+    env.events()
+        .publish((Symbol::new(env, "spending_updated"),), event);
 }

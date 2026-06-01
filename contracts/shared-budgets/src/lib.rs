@@ -145,7 +145,13 @@ impl SharedBudgetContract {
     }
 
     /// Contributes to a shared budget.
-    pub fn contribute_to_budget(env: Env, contributor: Address, budget_id: u64, amount: i128) {
+    pub fn contribute_to_budget(
+        env: Env,
+        contributor: Address,
+        budget_id: u64,
+        amount: i128,
+        memo: Option<Symbol>,
+    ) {
         contributor.require_auth();
 
         // Validate amount
@@ -182,6 +188,7 @@ impl SharedBudgetContract {
             budget_id,
             contributor: contributor.clone(),
             amount,
+            memo: memo.clone(),
             timestamp: env.ledger().timestamp(),
         };
 
@@ -201,7 +208,7 @@ impl SharedBudgetContract {
             .set(&DataKey::TotalContributionsProcessed, &contribution_id);
 
         // Emit event
-        SharedBudgetEvents::contribution_added(&env, budget_id, &contributor, amount);
+        SharedBudgetEvents::contribution_added(&env, budget_id, &contributor, amount, memo);
     }
 
     /// Spend from a shared budget with spending rule enforcement.
@@ -263,6 +270,42 @@ impl SharedBudgetContract {
 
         // Emit event
         SharedBudgetEvents::expense_incurred(&env, budget_id, &spender, &recipient, amount);
+    }
+
+    /// Transfers budget ownership from the current owner to a new account.
+    ///
+    /// Both the current owner and the new owner must authorize the transfer.
+    /// After transfer, the previous owner loses owner-level control.
+    pub fn transfer_budget_ownership(
+        env: Env,
+        current_owner: Address,
+        budget_id: u64,
+        new_owner: Address,
+    ) {
+        current_owner.require_auth();
+        new_owner.require_auth();
+
+        let mut budget: Budget = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Budget(budget_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SharedBudgetError::BudgetNotFound));
+
+        if current_owner != budget.creator {
+            panic_with_error!(&env, SharedBudgetError::Unauthorized);
+        }
+
+        if current_owner == new_owner {
+            return;
+        }
+
+        budget.creator = new_owner.clone();
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Budget(budget_id), &budget);
+
+        SharedBudgetEvents::ownership_transferred(&env, budget_id, &current_owner, &new_owner);
     }
 
     /// Add a member to an existing budget.
@@ -361,6 +404,65 @@ impl SharedBudgetContract {
             .unwrap_or(false)
     }
 
+    /// Returns the role of an account within a budget: "OWNER" for the creator,
+    /// "MEMBER" for a member, or "NONE" if the account is unrelated to the budget.
+    pub fn get_member_role(env: Env, budget_id: u64, account: Address) -> Symbol {
+        let budget: Budget = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Budget(budget_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SharedBudgetError::BudgetNotFound));
+
+        if account == budget.creator {
+            return Symbol::new(&env, "OWNER");
+        }
+
+        let is_member = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BudgetMember(budget_id, account))
+            .unwrap_or(false);
+
+        if is_member {
+            Symbol::new(&env, "MEMBER")
+        } else {
+            Symbol::new(&env, "NONE")
+        }
+    }
+
+    /// Returns budget utilization analytics as
+    /// `(utilization_percent, total_spent, avg_spending_per_member, remaining_balance)`.
+    ///
+    /// Utilization is the share of contributed funds that have been spent.
+    pub fn get_budget_utilization(env: Env, budget_id: u64) -> (u32, i128, i128, i128) {
+        let budget: Budget = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Budget(budget_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SharedBudgetError::BudgetNotFound));
+
+        let total_spent = budget.total_contributed - budget.balance;
+        let utilization_percent = if budget.total_contributed > 0 {
+            (total_spent * 100 / budget.total_contributed) as u32
+        } else {
+            0
+        };
+
+        let member_count = budget.members.len() as i128;
+        let avg_spending_per_member = if member_count > 0 {
+            total_spent / member_count
+        } else {
+            0
+        };
+
+        (
+            utilization_percent,
+            total_spent,
+            avg_spending_per_member,
+            budget.balance,
+        )
+    }
+
     /// Get contribution details.
     pub fn get_contribution(env: Env, contribution_id: u64) -> BudgetContribution {
         env.storage()
@@ -435,6 +537,35 @@ impl SharedBudgetContract {
             panic_with_error!(env, SharedBudgetError::Unauthorized);
         }
     }
+    
+    /// Returns all contributions made to a specific budget, in chronological order.
+///
+/// Returns an empty Vec if the budget exists but has received no contributions.
+/// Panics with `BudgetNotFound` if the budget does not exist.
+pub fn get_contributions(env: Env, budget_id: u64) -> Vec<BudgetContribution> {
+    // Guard: ensure the budget actually exists
+    if !env.storage().persistent().has(&DataKey::Budget(budget_id)) {
+        panic_with_error!(&env, SharedBudgetError::BudgetNotFound);
+    }
+
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::BudgetContributions(budget_id))
+        .unwrap_or_else(|| Vec::new(&env));
+
+    let mut result: Vec<BudgetContribution> = Vec::new(&env);
+    for id in ids.iter() {
+        if let Some(contrib) = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Contribution(id))
+        {
+            result.push_back(contrib);
+        }
+    }
+    result
+}
 }
 
 #[cfg(test)]

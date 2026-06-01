@@ -385,3 +385,52 @@ fn test_set_high_value_threshold_admin_only() {
     client.set_high_value_threshold(&admin, &100);
     client.set_high_value_threshold(&unauthorized, &200);
 }
+
+#[test]
+fn test_block_and_unblock_destination() {
+    let (env, _admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+    let dest = Address::generate(&env);
+
+    assert_eq!(client.is_destination_blocked(&user, &dest), false);
+
+    client.block_destination(&user, &dest);
+    assert_eq!(client.is_destination_blocked(&user, &dest), true);
+
+    client.unblock_destination(&user, &dest);
+    assert_eq!(client.is_destination_blocked(&user, &dest), false);
+}
+
+#[test]
+#[should_panic]
+fn test_submit_transaction_to_blocked_destination_fails() {
+    let (env, admin, client) = setup_test_contract();
+    configure_multisig(&env, &client, &admin, 2);
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    client.set_balance(&admin, &from, &1_000);
+
+    client.block_destination(&from, &to);
+
+    let asset: Option<Address> = None;
+    client.submit_transaction(&from, &to, &100, &symbol_short!("pay"), &asset);
+}
+
+#[test]
+#[should_panic]
+fn test_schedule_timelocked_transaction_to_blocked_destination_fails() {
+    let (env, admin, client) = setup_test_contract();
+    configure_multisig(&env, &client, &admin, 2);
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    client.set_balance(&admin, &from, &1_000);
+
+    client.block_destination(&from, &to);
+
+    let asset: Option<Address> = None;
+    let execute_at = env.ledger().timestamp() + 1000;
+    client.schedule_timelocked_transaction(&from, &to, &100, &symbol_short!("pay"), &asset, &execute_at);
+}
+

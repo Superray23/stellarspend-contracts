@@ -8,6 +8,14 @@ pub struct CategorySpending {
     pub volume: i128,
 }
 
+/// Spending entry used for multi-category batch aggregation
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CategorySpend {
+    pub category: Symbol,
+    pub amount: i128,
+}
+
 /// Historical analytics record for a user, category, and month
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -47,10 +47,11 @@ pub use crate::fees::{
 pub use crate::types::{
     AnalyticsEvents, AuditLog, BatchMetrics, BatchStatusUpdateResult, BundleResult,
     BundledTransaction, CategoryMetrics, DataKey, FeeCalculationResult, FeeConfig,
-    FeeDeductionEvent, FeeModel, FeeTier, MonthlySpendingAnalytics, RatingInput, RatingResult,
-    RatingStatus, RefundBatchMetrics, RefundRequest, RefundResult, RefundStatus,
-    StatusUpdateResult, Transaction, TransactionStatus, TransactionStatusUpdate,
-    UserSpendingSummary, ValidationError, ValidationResult, MAX_BATCH_SIZE,
+    FeeDeductionEvent, FeeModel, FeeTier, MonthlySpendingAnalytics, PaginatedBatchMetrics,
+    RatingInput, RatingResult, RatingStatus, RefundBatchMetrics, RefundRequest,
+    RefundResult, RefundStatus, StatusUpdateResult, Transaction, TransactionStatus,
+    TransactionStatusUpdate, UserSpendingSummary, ValidationError, ValidationResult,
+    MAX_BATCH_SIZE, MAX_PAGE_SIZE,
 };
 
 // Validation exports (single, de-duplicated block)
@@ -78,8 +79,10 @@ pub enum AnalyticsError {
     EmptyBatch = 4,
     /// Batch exceeds maximum size
     BatchTooLarge = 5,
+    /// Invalid page size for pagination
+    InvalidPageSize = 6,
     /// Invalid transaction amount
-    InvalidAmount = 6,
+    InvalidAmount = 7,
     /// Invalid audit log data
     InvalidAuditLog = 7,
     /// Bundle is empty
@@ -306,6 +309,73 @@ impl TransactionAnalyticsContract {
         env.storage()
             .persistent()
             .get(&DataKey::BatchMetrics(batch_id))
+    }
+
+    /// Returns paginated batch metrics for historical analytics data.
+    ///
+    /// Empty pages return an empty result set.
+    /// Page size values above the maximum are capped.
+    pub fn get_batch_metrics_paginated(
+        env: Env,
+        page: u32,
+        page_size: u32,
+    ) -> PaginatedBatchMetrics {
+        if page_size == 0 {
+            panic_with_error!(&env, AnalyticsError::InvalidPageSize);
+        }
+
+        let page_size = core::cmp::min(page_size, MAX_PAGE_SIZE);
+        let total_count = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastBatchId)
+            .unwrap_or(0) as u32;
+
+        if total_count == 0 {
+            return PaginatedBatchMetrics {
+                metrics: Vec::new(&env),
+                total_count,
+                page_number: page,
+                page_size,
+                has_next: false,
+                has_previous: false,
+            };
+        }
+
+        let start_index = page.saturating_mul(page_size) as usize;
+        let end_index = core::cmp::min(start_index + page_size as usize, total_count as usize);
+
+        if start_index >= total_count as usize {
+            return PaginatedBatchMetrics {
+                metrics: Vec::new(&env),
+                total_count,
+                page_number: page,
+                page_size,
+                has_next: false,
+                has_previous: page > 0 && total_count > 0,
+            };
+        }
+
+        let mut metrics: Vec<BatchMetrics> = Vec::new(&env);
+        for index in start_index..end_index {
+            let batch_id = (index as u64) + 1;
+            if let Some(batch_metrics) = env
+                .storage()
+                .persistent()
+                .get(&DataKey::BatchMetrics(batch_id))
+            {
+                metrics.push_back(batch_metrics);
+            }
+        }
+
+        PaginatedBatchMetrics {
+            metrics,
+            total_count,
+            page_number: page,
+            page_size,
+            has_next: end_index < total_count as usize,
+            has_previous: page > 0,
+        }
     }
 
     /// Returns the last processed batch ID.
@@ -989,11 +1059,7 @@ impl TransactionAnalyticsContract {
 
         // Emit operation fee updated event
         crate::types::AnalyticsEvents::operation_fee_updated(
-            &env,
-            &admin,
-            &operation,
-            previous,
-            new_config,
+            &env, &admin, &operation, previous, new_config,
         );
     }
 

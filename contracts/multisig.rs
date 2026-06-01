@@ -14,6 +14,7 @@ pub enum DataKey {
     Approval(u64, Address),
     ApprovalCount(u64),
     Balance(Address),
+    BlacklistedDestination(Address, Address),
 }
 
 #[derive(Clone)]
@@ -46,6 +47,7 @@ pub enum MultiSigError {
     InsufficientBalance = 11,
     MultisigNotConfigured = 12,
     Overflow = 13,
+    BlacklistedDestination = 14,
 }
 
 pub struct MultisigEvents;

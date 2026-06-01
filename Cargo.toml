@@ -7,12 +7,14 @@ members = [
     "contracts/contract-upgrade/old_contract",
     "contracts/contract-upgrade/new_contract",
     "contracts/shared",
+    "contracts/transfer",
     "contracts/batch-transfer",
     "contracts/batch-conversion",
     "contracts/batch-rewards",
     "contracts/batch-payment",
     "contracts/batch-payment-reminders",
     "contracts/batch-wallet-creation",
+    "contracts/budget",
     "contracts/budget-recommendations",
     "contracts/fee",
     "contracts/shared-budgets",
@@ -28,6 +30,13 @@ members = [
     "contracts/asset_control",
     "contracts/access-control",
     "contracts/budget",
+    "contracts/category-analytics",
+    "contracts/spending-categories",
+    "contracts/users",
+    "contracts/transactions",
+    "contracts/transaction-validation",
+    "contracts/merchant-tagging",
+    "contracts/benchmarks",
 ]
 
 [package]
@@ -35,6 +44,7 @@ name = "stellarspend-contracts-tests"
 version = "0.1.0"
 edition = "2021"
 publish = false
+autotests = false
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
@@ -46,6 +56,18 @@ path = "tests/snapshot_tests.rs"
 [[test]]
 name = "memo_tests"
 path = "tests/memo_tests.rs"
+
+[[test]]
+name = "governance_test"
+path = "contracts/tests/governance_test.rs"
+
+[[test]]
+name = "rate_limit_tests"
+path = "tests/rate_limit_tests.rs"
+
+[[test]]
+name = "concurrent_spending_tests"
+path = "contracts/tests/concurrent_spending_tests.rs"
 
 [workspace.package]
 version = "0.1.0"

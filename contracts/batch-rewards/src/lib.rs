@@ -13,6 +13,7 @@ pub use crate::types::{
     BatchRewardResult, DataKey, RewardEvents, RewardRequest, RewardResult, MAX_BATCH_SIZE,
 };
 use crate::validation::{validate_address, validate_amount};
+use shared::validation::validate_batch_size;
 
 /// Error codes for the batch rewards contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -130,7 +131,7 @@ impl BatchRewardsContract {
         if request_count == 0 {
             panic_with_error!(&env, BatchRewardsError::EmptyBatch);
         }
-        if request_count > MAX_BATCH_SIZE {
+        if validate_batch_size(request_count, MAX_BATCH_SIZE).is_err() {
             panic_with_error!(&env, BatchRewardsError::BatchTooLarge);
         }
 

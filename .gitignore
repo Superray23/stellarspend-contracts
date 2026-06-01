@@ -23,6 +23,15 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Ignore generated root files and temporary outputs
+*.json
+!package.json
+!tsconfig.json
+*.txt
+/*.js
+node_modules/
+dist/
+
 # Logs
 *.log
 

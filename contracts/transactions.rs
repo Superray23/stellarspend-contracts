@@ -59,6 +59,24 @@ impl TransactionsContract {
         Self::balance_of(&env, &user)
     }
 
+    pub fn block_destination(env: Env, caller: Address, destination: Address) {
+        caller.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::BlacklistedDestination(caller, destination), &true);
+    }
+
+    pub fn unblock_destination(env: Env, caller: Address, destination: Address) {
+        caller.require_auth();
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BlacklistedDestination(caller, destination));
+    }
+
+    pub fn is_destination_blocked(env: Env, caller: Address, destination: Address) -> bool {
+        Self::is_blocked(&env, &caller, &destination)
+    }
+
     pub fn submit_transaction(
         env: Env,
         from: Address,
@@ -68,6 +86,10 @@ impl TransactionsContract {
         asset: Option<Address>,
     ) -> Option<u64> {
         from.require_auth();
+
+        if Self::is_blocked(&env, &from, &to) {
+            panic_with_error!(&env, MultiSigError::BlacklistedDestination);
+        }
 
         if amount <= 0 {
             panic_with_error!(&env, MultiSigError::InvalidAmount);
@@ -175,6 +197,10 @@ impl TransactionsContract {
         execute_at: u64,
     ) -> TimelockedTx {
         from.require_auth();
+
+        if Self::is_blocked(&env, &from, &to) {
+            panic_with_error!(&env, MultiSigError::BlacklistedDestination);
+        }
 
         if amount <= 0 {
             panic_with_error!(&env, MultiSigError::InvalidAmount);
@@ -309,5 +335,11 @@ impl TransactionsContract {
             .persistent()
             .get(&DataKey::Balance(user.clone()))
             .unwrap_or(0)
+    }
+
+    fn is_blocked(env: &Env, caller: &Address, destination: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::BlacklistedDestination(caller.clone(), destination.clone()))
     }
 }

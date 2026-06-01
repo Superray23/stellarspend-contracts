@@ -51,14 +51,25 @@ pub struct UserBudgetCategories {
     pub last_updated: u64,
 }
 
+/// Query response summarizing a user's budget allocation state
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BudgetAllocationSummary {
+    pub remaining_allocation: i128,
+    pub total_allocation: i128,
+    pub usage_percentage: i128,
+}
+
 /// Storage keys for the contract
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Admin,
     Budget(Address),
-    BudgetCategories(Address), // User's budget categories
-    TotalAllocated,            // Track global stats if needed
+    BudgetCategories(Address),    // User's budget categories
+    TotalAllocated,               // Track global stats if needed
+    BudgetSnapshot(u64, Address), // Snapshot of budget state at timestamp
+    SnapshotTimestamps(Vec<u64>), // List of all snapshot timestamps
 }
 
 /// Result of a batch budget allocation operation

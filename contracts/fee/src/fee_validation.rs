@@ -1,4 +1,5 @@
-use soroban_sdk::contracterror;
+use crate::storage::MAX_FEE_BPS;
+use soroban_sdk::{contracterror, panic_with_error, Env};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -18,6 +19,16 @@ pub fn validate_fee(fee: i128, min_fee: i128, max_fee: i128) -> Result<(), FeeVa
     Ok(())
 }
 
+pub fn validate_fee_percentage_bounds(env: &Env, fee_bps: u32) -> bool {
+    if fee_bps == 0 {
+        panic_with_error!(env, FeeValidationError::FeeTooLow);
+    }
+    if fee_bps > MAX_FEE_BPS {
+        panic_with_error!(env, FeeValidationError::FeeTooHigh);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -34,6 +45,9 @@ mod tests {
 
     #[test]
     fn test_fee_too_high() {
-        assert_eq!(validate_fee(200, 10, 100), Err(FeeValidationError::FeeTooHigh));
+        assert_eq!(
+            validate_fee(200, 10, 100),
+            Err(FeeValidationError::FeeTooHigh)
+        );
     }
 }

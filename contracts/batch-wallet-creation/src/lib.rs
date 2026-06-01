@@ -7,10 +7,11 @@ mod validation;
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env, Vec};
 
 pub use crate::types::{
-    BatchCreateResult, BatchRecoveryResult, DataKey, Wallet, WalletCreateRequest,
-    WalletCreateResult, WalletEvents, WalletRecoveryRequest, WalletRecoveryResult, MAX_BATCH_SIZE,
+    BatchCreateResult, BatchRecoveryResult, DataKey, Wallet, WalletCreatedEvent,
+    WalletCreateRequest, WalletCreateResult, WalletEvents, WalletRecoveryRequest,
+    WalletRecoveryResult, MAX_BATCH_SIZE,
 };
-use crate::validation::{validate_address, wallet_exists};
+use crate::validation::{check_batch_duplicates, validate_address, wallet_exists};
 
 /// Error codes for the batch wallet creation contract.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -26,6 +27,8 @@ pub enum BatchWalletError {
     EmptyBatch = 4,
     /// Batch exceeds maximum size
     BatchTooLarge = 5,
+    /// Batch contains duplicate wallet requests
+    DuplicateWallet = 6,
 }
 
 impl From<BatchWalletError> for soroban_sdk::Error {
@@ -69,6 +72,19 @@ impl BatchWalletContract {
         }
         if request_count > MAX_BATCH_SIZE {
             panic_with_error!(&env, BatchWalletError::BatchTooLarge);
+        }
+
+        // Check for duplicate wallet requests in the batch
+        if let Err(duplicate_address) = check_batch_duplicates(&requests) {
+            // Emit event or log for debugging purposes
+            env.events().publish(
+                (
+                    soroban_sdk::symbol_short!("wallet"),
+                    soroban_sdk::symbol_short!("duplicate"),
+                ),
+                duplicate_address,
+            );
+            panic_with_error!(&env, BatchWalletError::DuplicateWallet);
         }
 
         // Get batch ID and increment
@@ -141,7 +157,12 @@ impl BatchWalletContract {
             results.push_back(WalletCreateResult::Success(request.owner.clone()));
             successful_count += 1;
 
-            WalletEvents::wallet_created(&env, batch_id, &request.owner, wallet.id);
+            let wallet_event = WalletCreatedEvent {
+                owner: request.owner.clone(),
+                wallet_id: wallet.id,
+                created_at: wallet.created_at,
+            };
+            WalletEvents::wallet_created(&env, batch_id, &wallet_event);
         }
 
         // Update storage

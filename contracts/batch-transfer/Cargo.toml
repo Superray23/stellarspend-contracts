@@ -5,13 +5,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Batch XLM transfer contract for StellarSpend"
-
+#pub struct BatchHistoryContract;
 [lib]
 crate-type = ["cdylib"]
 doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+shared = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

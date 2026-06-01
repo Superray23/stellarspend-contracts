@@ -25,6 +25,10 @@ pub struct SavingsGoalRequest {
     pub deadline: u64,
     /// Initial contribution amount (optional, can be 0)
     pub initial_contribution: i128,
+    /// Optional lock duration in seconds (0 = no lock, withdrawals allowed immediately)
+    pub lock_duration_seconds: u64,
+    /// Expiration duration in seconds (0 = no expiration)
+    pub expiration_seconds: u64,
 }
 
 /// Represents a created savings goal.
@@ -47,6 +51,28 @@ pub struct SavingsGoal {
     pub created_at: u64,
     /// Whether the goal is active
     pub is_active: bool,
+    /// Whether the goal has reached its target amount
+    pub is_complete: bool,
+    /// Timestamp after which withdrawals are allowed (0 = no lock)
+    pub unlock_at: u64,
+    /// Timestamp after which the goal expires (0 = no expiration)
+    pub expires_at: u64,
+}
+
+/// Represents progress information for a savings goal.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct SavingsGoalProgress {
+    /// Unique goal ID
+    pub goal_id: u64,
+    /// Current saved amount
+    pub current_amount: i128,
+    /// Target amount to save
+    pub target_amount: i128,
+    /// Progress percentage capped at 100
+    pub progress_percentage: u32,
+    /// Whether the goal is complete
+    pub is_complete: bool,
 }
 
 /// Result of processing a single goal creation.
@@ -201,6 +227,8 @@ pub enum DataKey {
     TotalMilestonesAchieved,
     /// Ledger sequence at which a goal was automatically closed
     GoalClosedAt(u64),
+    /// Maps (user, goal_name) -> goal_id for duplicate detection
+    GoalByName(Address, Symbol),
 }
 
 /// Error codes for goal validation and creation.
@@ -231,6 +259,14 @@ pub mod ErrorCode {
     pub const GOAL_CLOSED: u32 = 11;
     /// Contribution amount is invalid (zero or negative)
     pub const INVALID_CONTRIBUTION_AMOUNT: u32 = 12;
+    /// Duplicate goal name for the same user
+    pub const DUPLICATE_GOAL_NAME: u32 = 11;
+    /// Goal is locked; withdrawals not yet allowed
+    pub const GOAL_LOCKED: u32 = 12;
+    /// Withdrawal amount exceeds current balance
+    pub const INSUFFICIENT_BALANCE: u32 = 13;
+    /// Invalid withdrawal or contribution amount
+    pub const INVALID_WITHDRAW_AMOUNT: u32 = 14;
 }
 
 /// Events emitted by the savings goals contract.
@@ -299,10 +335,37 @@ impl GoalEvents {
             ),
         );
     }
+
     /// Event emitted when a milestone percentage is achieved automatically.
     pub fn milestone_achieved_percent(env: &Env, goal_id: u64, milestone_percent: u32) {
         let topics = (symbol_short!("milestone"), symbol_short!("auto"), goal_id);
         env.events().publish(topics, (goal_id, milestone_percent));
+    }
+
+    /// Event emitted when a contribution is made to a goal.
+    pub fn goal_contributed(
+        env: &Env,
+        goal_id: u64,
+        user: &Address,
+        amount: i128,
+        new_total: i128,
+    ) {
+        let topics = (symbol_short!("goal"), symbol_short!("contrib"), goal_id);
+        env.events()
+            .publish(topics, (user.clone(), amount, new_total));
+    }
+
+    /// Event emitted when a withdrawal is rejected because the goal is locked.
+    pub fn goal_withdraw_locked(env: &Env, goal_id: u64, user: &Address, unlock_at: u64) {
+        let topics = (symbol_short!("goal"), symbol_short!("wd_lock"), goal_id);
+        env.events().publish(topics, (user.clone(), unlock_at));
+    }
+
+    /// Event emitted when funds are withdrawn from a goal.
+    pub fn goal_withdrawn(env: &Env, goal_id: u64, user: &Address, amount: i128, remaining: i128) {
+        let topics = (symbol_short!("goal"), symbol_short!("withdraw"), goal_id);
+        env.events()
+            .publish(topics, (user.clone(), amount, remaining));
     }
 
     /// Event emitted when milestone achievement fails.
@@ -333,5 +396,34 @@ impl GoalEvents {
         let topics = (symbol_short!("goal"), symbol_short!("closed"), goal_id);
         env.events()
             .publish(topics, (goal_id, user.clone(), final_amount, closed_at));
+    /// Event emitted when a savings goal target is reached (completed).
+    pub fn goal_completed(env: &Env, goal_id: u64, user: &Address, target_amount: i128) {
+        let topics = (
+            symbol_short!("goal"),
+            symbol_short!("completed"),
+            goal_id,
+            user.clone(),
+        );
+        env.events().publish(topics, target_amount);
+    }
+
+    /// Event emitted when a partial withdrawal is made from a goal.
+    pub fn partial_withdrawal(
+        env: &Env,
+        goal_id: u64,
+        user: &Address,
+        amount: i128,
+        remaining: i128,
+    ) {
+        let topics = (symbol_short!("goal"), symbol_short!("withdraw"));
+        env.events()
+            .publish(topics, (goal_id, user.clone(), amount, remaining));
+    }
+
+    /// Event emitted when a goal is renamed.
+    pub fn goal_renamed(env: &Env, goal_id: u64, old_name: &Symbol, new_name: &Symbol) {
+        let topics = (symbol_short!("goal"), symbol_short!("renamed"), goal_id);
+        env.events()
+            .publish(topics, (old_name.clone(), new_name.clone()));
     }
 }

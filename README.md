@@ -25,7 +25,19 @@ They are designed to support **financial inclusion**, **self-sovereign identity*
 - **Open & Auditable** — Fully transparent smart contract logic
 
 ---
-Contributing We welcome contributions! Fork the repository Create a branch: git checkout -b feature/short-description Implement changes and add tests where applicable Run linters and tests locally Open a clear Pull Request describing the changes Look for issues.
+## Product / Website
+StellarSpend is the smart-contract layer for automated budgets, savings goals, and spending limit features on Stellar. If a public website or product documentation exists, add the reference here so contributors know where to learn more.
+
+---
+## Contributing
+We welcome contributions!
+
+1. Fork the repository
+2. Create a branch: `git checkout -b feature/short-description`
+3. Implement changes and add tests where applicable
+4. Run linters and tests locally
+5. Open a clear Pull Request describing the changes
+6. Look for issues and link them in your PR
 
 ## Quick Start
 

@@ -1,11 +1,11 @@
-#![no_std]
+﻿#![no_std]
 
 #[cfg(test)]
 mod test;
 mod types;
 
-use crate::types::{DataKey, RecurringPayment};
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env};
+use crate::types::{DataKey, IncomeStream, RecurringPayment};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Symbol, Vec};
 
 #[contract]
 pub struct RecurringPaymentContract;
@@ -57,6 +57,9 @@ impl RecurringPaymentContract {
             interval,
             next_execution: start_time,
             active: true,
+            execution_count: 0,
+            missed_count: 0,
+            last_missed_at: 0,
         };
 
         env.storage()
@@ -90,9 +93,27 @@ impl RecurringPaymentContract {
             panic!("Too early for next execution");
         }
 
-        // Transfer tokens from sender to recipient.
+        // Attempt token transfer; track missed execution on failure
         let token_client = token::Client::new(&env, &payment.token);
+        let sender_balance = token_client.balance(&payment.sender);
+        if sender_balance < payment.amount {
+            // Track the missed execution
+            payment.missed_count += 1;
+            payment.last_missed_at = env.ledger().timestamp();
+            env.storage()
+                .instance()
+                .set(&DataKey::Payment(payment_id), &payment);
+            env.events().publish(
+                (symbol_short!("recur"), symbol_short!("missed"), payment_id),
+                (payment.missed_count, payment.last_missed_at),
+            );
+            panic!("Insufficient funds for payment");
+        }
         token_client.transfer(&payment.sender, &payment.recipient, &payment.amount);
+
+        // Reset missed count on successful execution
+        payment.missed_count = 0;
+        payment.last_missed_at = 0;
 
         // Update next execution time
         payment.next_execution += payment.interval;
@@ -106,6 +127,9 @@ impl RecurringPaymentContract {
             let intervals_passed = (current_time - payment.next_execution) / payment.interval;
             payment.next_execution += (intervals_passed + 1) * payment.interval;
         }
+
+        // Increment execution counter
+        payment.execution_count += 1;
 
         env.storage()
             .instance()
@@ -163,4 +187,184 @@ impl RecurringPaymentContract {
             .get(&DataKey::Payment(payment_id))
             .expect("Payment not found")
     }
+
+    /// Creates a recurring income stream that auto-funds budgets or goals.
+    ///
+    /// # Arguments
+    /// * `recipient` - The address receiving the income (must authorize)
+    /// * `source` - Description of the income source
+    /// * `amount` - Amount received per interval (> 0)
+    /// * `interval_seconds` - Seconds between income events (> 0)
+    /// * `target_goal_id` - Goal ID to auto-fund (0 = manual allocation)
+    ///
+    /// # Returns
+    /// The unique stream ID.
+    pub fn create_income_stream(
+        env: Env,
+        recipient: Address,
+        source: Symbol,
+        amount: i128,
+        interval_seconds: u64,
+        target_goal_id: u64,
+    ) -> u64 {
+        recipient.require_auth();
+
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        if interval_seconds == 0 {
+            panic!("Interval must be positive");
+        }
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::IncomeStreamCount)
+            .unwrap_or(0);
+        count += 1;
+
+        let now = env.ledger().timestamp();
+        let stream = IncomeStream {
+            stream_id: count,
+            recipient: recipient.clone(),
+            source: source.clone(),
+            amount,
+            interval_seconds,
+            next_payout: now + interval_seconds,
+            target_goal_id,
+            active: true,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::IncomeStream(count), &stream);
+        env.storage()
+            .instance()
+            .set(&DataKey::IncomeStreamCount, &count);
+
+        // Track stream in user's list
+        let mut user_streams: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::UserIncomeStreams(recipient.clone()))
+            .unwrap_or(Vec::new(&env));
+        user_streams.push_back(count);
+        env.storage().instance().set(
+            &DataKey::UserIncomeStreams(recipient.clone()),
+            &user_streams,
+        );
+
+        env.events().publish(
+            (symbol_short!("income"), symbol_short!("created"), count),
+            (recipient, source, amount),
+        );
+
+        count
+    }
+
+    /// Processes a recurring income stream, calculating and applying any
+    /// missed cycles since the last payout.
+    ///
+    /// Automatically updates the next payout time and handles catch-up.
+    ///
+    /// # Arguments
+    /// * `stream_id` - The ID returned by `create_income_stream`
+    pub fn process_income(env: Env, stream_id: u64) {
+        let mut stream: IncomeStream = env
+            .storage()
+            .instance()
+            .get(&DataKey::IncomeStream(stream_id))
+            .expect("Income stream not found");
+
+        if !stream.active {
+            panic!("Income stream is not active");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < stream.next_payout {
+            panic!("Too early for next payout");
+        }
+
+        // Calculate cycles due (handle catch-up for missed intervals)
+        let elapsed = now - stream.next_payout;
+        let cycles_due = 1 + (elapsed / stream.interval_seconds);
+        let total_payout = stream
+            .amount
+            .checked_mul(cycles_due as i128)
+            .unwrap_or(i128::MAX);
+
+        // Advance next_payout past all due cycles
+        stream.next_payout += cycles_due * stream.interval_seconds;
+
+        // If still behind, catch up to the future
+        if stream.next_payout <= now {
+            stream.next_payout = now + stream.interval_seconds;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::IncomeStream(stream_id), &stream);
+
+        env.events().publish(
+            (
+                symbol_short!("income"),
+                symbol_short!("processed"),
+                stream_id,
+            ),
+            (stream.recipient, total_payout, cycles_due),
+        );
+    }
+
+    /// Cancels a recurring income stream. Only the recipient may cancel.
+    ///
+    /// # Arguments
+    /// * `stream_id` - The ID returned by `create_income_stream`
+    pub fn cancel_income_stream(env: Env, stream_id: u64) {
+        let mut stream: IncomeStream = env
+            .storage()
+            .instance()
+            .get(&DataKey::IncomeStream(stream_id))
+            .expect("Income stream not found");
+
+        stream.recipient.require_auth();
+
+        if !stream.active {
+            panic!("Income stream is already canceled");
+        }
+
+        stream.active = false;
+        env.storage()
+            .instance()
+            .set(&DataKey::IncomeStream(stream_id), &stream);
+
+        env.events().publish(
+            (
+                symbol_short!("income"),
+                symbol_short!("canceled"),
+                stream_id,
+            ),
+            stream.recipient,
+        );
+    }
+
+    /// Returns the full details of an income stream.
+    ///
+    /// # Arguments
+    /// * `stream_id` - The ID returned by `create_income_stream`
+    pub fn get_income_stream(env: Env, stream_id: u64) -> IncomeStream {
+        env.storage()
+            .instance()
+            .get(&DataKey::IncomeStream(stream_id))
+            .expect("Income stream not found")
+    }
+
+    /// Returns all income stream IDs for a user.
+    pub fn get_user_income_streams(env: Env, user: Address) -> Vec<u64> {
+        env.storage()
+            .instance()
+            .get(&DataKey::UserIncomeStreams(user))
+            .unwrap_or(Vec::new(&env))
+    }
 }
+
+

@@ -15,10 +15,10 @@ pub fn calculate_fee_decay(
     }
 
     let time_elapsed = (current_time - last_active) as i128;
-    
+
     // decay = time_elapsed * decay_rate
     let decay = time_elapsed.checked_mul(DECAY_RATE).unwrap_or(base_fee);
-    
+
     // Result: max(min_fee, base_fee - decay)
     let decayed_fee = base_fee.checked_sub(decay).unwrap_or(MIN_FEE);
 

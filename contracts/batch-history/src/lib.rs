@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
-
+//pub struct BatchHistoryContract;
 mod logic;
 mod types;
 

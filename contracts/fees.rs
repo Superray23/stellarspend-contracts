@@ -2,6 +2,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
     Env, String, Vec,
 };
+use crate::treasury::TreasuryContractClient;
 
 // =============================================================================
 // Rounding Modes for Fee Calculation
@@ -898,6 +899,8 @@ impl FeesContract {
         if treasury_amount > 0 {
             if let Some(treasury) = Self::get_treasury_address(&env) {
                 FeeEvents::fees_routed_to_treasury(&env, treasury_amount, &treasury);
+                let client = TreasuryContractClient::new(&env, &treasury);
+                client.credit_fee(&treasury_amount);
             }
         }
         (net, fee)
@@ -996,6 +999,8 @@ impl FeesContract {
         if treasury_amount > 0 {
             if let Some(treasury) = Self::get_treasury_address(&env) {
                 FeeEvents::fees_routed_to_treasury(&env, treasury_amount, &treasury);
+                let client = TreasuryContractClient::new(&env, &treasury);
+                client.credit_fee(&treasury_amount);
             }
         }
         (net, fee)

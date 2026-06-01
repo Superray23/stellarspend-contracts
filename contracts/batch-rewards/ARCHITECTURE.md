@@ -1,7 +1,7 @@
 # Batch Rewards Contract - Architecture & Design Decisions
 
 ## Architecture Overview
-
+//pub struct BatchHistoryContract;
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                 Batch Rewards Contract                      │

@@ -19,8 +19,8 @@ fn test_record_spending() {
     client.record_spending(&user, &category, &1000);
 
     let _metrics = client.get_category_metrics(&user, &category, &2026, &2); // Assuming current date in test env
-    // Note: get_year_month(0) gives 1970, 1. But Env::default().ledger().timestamp() is typically higher or configurable.
-    // Let's check what the default timestamp is.
+                                                                             // Note: get_year_month(0) gives 1970, 1. But Env::default().ledger().timestamp() is typically higher or configurable.
+                                                                             // Let's check what the default timestamp is.
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn test_yearly_trend() {
 
     // Record spending in different "months" by advancing ledger time
     // Default ledger time starts at 0 or a small number.
-    
+
     client.record_spending(&user, &category, &500);
     client.record_spending(&user, &category, &500);
 

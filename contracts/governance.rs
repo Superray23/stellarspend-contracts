@@ -45,6 +45,18 @@ pub enum GovernanceError {
 pub struct GovernanceEvents;
 
 impl GovernanceEvents {
+    pub fn admin_updated(env: &Env, previous_admin: &Address, new_admin: &Address) {
+        let topics = (symbol_short!("gov"), symbol_short!("admin"));
+        env.events().publish(
+            topics,
+            (
+                previous_admin.clone(),
+                new_admin.clone(),
+                env.ledger().timestamp(),
+            ),
+        );
+    }
+
     pub fn proposal_created(
         env: &Env,
         id: u32,
@@ -110,6 +122,14 @@ pub fn require_admin(env: &Env, caller: &Address) {
     if admin != *caller {
         panic_with_error!(env, GovernanceError::Unauthorized);
     }
+}
+
+pub fn update_admin(env: &Env, current_admin: Address, new_admin: Address) {
+    require_admin(env, &current_admin);
+    env.storage()
+        .instance()
+        .set(&GovernanceDataKey::Admin, &new_admin);
+    GovernanceEvents::admin_updated(env, &current_admin, &new_admin);
 }
 
 /// Maximum length for config key and value strings
@@ -260,6 +280,17 @@ pub struct GovernanceContract;
 impl GovernanceContract {
     pub fn initialize(env: Env, admin: Address, required_approvals: u32) {
         initialize_governance(&env, admin, required_approvals);
+    }
+
+    pub fn update_admin(env: Env, current_admin: Address, new_admin: Address) {
+        update_admin(&env, current_admin, new_admin);
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&GovernanceDataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, GovernanceError::NotInitialized))
     }
 
     pub fn create_proposal(

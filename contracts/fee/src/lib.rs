@@ -2,41 +2,41 @@
 
 extern crate alloc;
 
+mod auth;
 mod decay;
 mod escrow;
 mod events;
+mod fee_validation;
 mod reconciliation;
 mod storage;
 mod utils;
 mod validation;
-mod auth;
 
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env, Vec};
 
+use crate::auth::require_admin;
 use crate::decay::calculate_fee_decay;
 use crate::escrow::{
     collect_batch_to_escrow, collect_to_escrow, release_cycle_fees, rollover_cycle_fees,
 };
-use crate::events::{ConfigEvents, FeeEvents, TierEvents};
+use crate::events::{ConfigEvents, FeeEvents};
 use crate::reconciliation::reconcile;
 pub use crate::reconciliation::ReconciliationResult;
 use crate::storage::{
-    has_admin, is_valid_tier, read_admin, read_current_cycle, read_escrow_balance, read_fee_bps,
-    read_last_active, read_locked, read_min_fee, read_pending_fees, read_token,
-    read_total_batch_calls, read_total_collected, read_total_released, read_treasury,
-    read_user_tier, remove_user_tier, write_admin, write_current_cycle, write_fee_bps,
-    write_last_active, write_locked, write_min_fee, write_token, write_treasury, write_user_tier,
-    DEFAULT_FEE_BPS, DEFAULT_MIN_FEE,
+    has_admin, read_admin, read_current_cycle, read_escrow_balance, read_fee_bps, read_last_active,
+    read_locked, read_max_fee, read_min_fee, read_pending_fees, read_token, read_total_batch_calls,
+    read_total_collected, read_total_released, read_treasury, write_admin, write_current_cycle,
+    write_fee_bps, write_last_active, write_locked, write_max_fee, write_min_fee, write_token,
+    write_treasury, FeeConfig, FeeStats, DEFAULT_FEE_BPS, DEFAULT_MAX_FEE, DEFAULT_MIN_FEE,
 };
 pub use crate::storage::{BatchFeeResult, DataKey, MAX_BATCH_SIZE, MAX_FEE_BPS};
-use crate::utils::format_amount;
-use crate::validation::{validate_fee_bps_or_panic, validate_min_fee_or_panic};
-use shared::utils::validate_amount as validate_non_negative_amount;
-use crate::auth::require_admin;
-use crate::utils::compute_fee;
+use crate::validation::{
+    validate_amount_positive_or_panic, validate_fee_bps_or_panic, validate_max_fee_or_panic,
+    validate_min_fee_or_panic,
+};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -80,27 +80,47 @@ impl FeeContract {
         if initial_cycle == 0 {
             panic_with_error!(&env, FeeContractError::InvalidConfig);
         }
-        if !validate_fee_bps_or_panic(&env, fee_bps) {
-            panic_with_error!(&env, FeeContractError::InvalidConfig);
-        }
+        validate_fee_percentage_bounds(&env, fee_bps);
 
-        write_admin(&env, &admin);
-        write_token(&env, &token);
-        write_treasury(&env, &treasury);
-        write_fee_bps(&env, fee_bps);
-        write_locked(&env, false);
-        write_current_cycle(&env, initial_cycle);
+        // Storage optimization (#484): write FeeConfig once instead of 6
+        // separate storage operations.
+        let config = FeeConfig {
+            admin,
+            token,
+            treasury,
+            fee_bps,
+            min_fee: DEFAULT_MIN_FEE,
+            max_fee: DEFAULT_MAX_FEE,
+            is_locked: false,
+            current_cycle: initial_cycle,
+        };
+        env.storage().instance().set(&DataKey::FeeConfig, &config);
+
+        // Initialize stats.
+        let stats = FeeStats {
+            escrow_balance: 0,
+            total_collected: 0,
+            total_released: 0,
+            total_batch_calls: 0,
+        };
+        env.storage().instance().set(&DataKey::FeeStats, &stats);
     }
 
     /// Initializes the contract with default fee configuration:
     /// - Fee: 3.00% (300 BPS)
     /// - Initial Cycle: 1
+    ///
+    /// # Storage Optimization (#484)
+    /// Writes FeeConfig and FeeStats in 2 operations instead of 10+ separate
+    /// storage writes, reducing Soroban storage I/O overhead.
     pub fn init(env: Env, admin: Address, token: Address, treasury: Address) {
         Self::initialize(env, admin, token, treasury, 300, 1);
     }
 
     pub fn collect_fee(env: Env, payer: Address, amount: i128) -> i128 {
+        Self::require_initialized(&env);
         payer.require_auth();
+        validate_amount_positive_or_panic(&env, amount);
 
         let last_active = read_last_active(&env, &payer);
         let current_time = env.ledger().timestamp();
@@ -116,6 +136,7 @@ impl FeeContract {
     }
 
     pub fn collect_fee_batch(env: Env, payer: Address, amounts: Vec<i128>) -> BatchFeeResult {
+        Self::require_initialized(&env);
         payer.require_auth();
 
         let batch_size = amounts.len();
@@ -132,6 +153,7 @@ impl FeeContract {
         let mut decayed_amounts = Vec::new(&env);
         let mut total_original_amount: i128 = 0;
         for amount in amounts.iter() {
+            validate_amount_positive_or_panic(&env, amount);
             total_original_amount = total_original_amount
                 .checked_add(amount)
                 .unwrap_or_else(|| panic_with_error!(&env, FeeContractError::Overflow));
@@ -154,11 +176,13 @@ impl FeeContract {
     }
 
     pub fn update_activity(env: Env, user: Address) {
+        Self::require_initialized(&env);
         user.require_auth();
         write_last_active(&env, &user, env.ledger().timestamp());
     }
 
     pub fn get_last_active(env: Env, user: Address) -> u64 {
+        Self::require_initialized(&env);
         read_last_active(&env, &user)
     }
 
@@ -202,7 +226,7 @@ impl FeeContract {
         require_admin(&env, &_admin);
         Self::require_unlocked(&env);
 
-        validate_fee_bps_or_panic(&env, fee_bps);
+        validate_fee_percentage_bounds(&env, fee_bps);
 
         write_fee_bps(&env, fee_bps);
         FeeEvents::fee_bps_updated(&env, fee_bps);
@@ -226,6 +250,16 @@ impl FeeContract {
         FeeEvents::min_fee_updated(&env, min_fee);
     }
 
+    pub fn set_max_fee(env: Env, _admin: Address, max_fee: i128) {
+        require_admin(&env, &_admin);
+        Self::require_unlocked(&env);
+
+        let min_fee = read_min_fee(&env);
+        validate_max_fee_or_panic(&env, max_fee, min_fee);
+
+        write_max_fee(&env, max_fee);
+    }
+
     /// Resets fee configuration to default values. Admin-only.
     /// Restores:
     /// - fee_bps to DEFAULT_FEE_BPS (500 = 5%)
@@ -243,14 +277,17 @@ impl FeeContract {
     }
 
     pub fn get_admin(env: Env) -> Address {
+        Self::require_initialized(&env);
         read_admin(&env)
     }
 
     pub fn get_token(env: Env) -> Address {
+        Self::require_initialized(&env);
         read_token(&env)
     }
 
     pub fn get_treasury(env: Env) -> Address {
+        Self::require_initialized(&env);
         read_treasury(&env)
     }
 
@@ -262,15 +299,22 @@ impl FeeContract {
         read_min_fee(&env)
     }
 
+    pub fn get_max_fee(env: Env) -> i128 {
+        read_max_fee(&env)
+    }
+
     pub fn is_locked(env: Env) -> bool {
+        Self::require_initialized(&env);
         read_locked(&env)
     }
 
     pub fn get_current_cycle(env: Env) -> u64 {
+        Self::require_initialized(&env);
         read_current_cycle(&env)
     }
 
     pub fn get_escrow_balance(env: Env) -> i128 {
+        Self::require_initialized(&env);
         read_escrow_balance(&env)
     }
 
@@ -281,19 +325,46 @@ impl FeeContract {
     }
 
     pub fn get_pending_fees(env: Env, cycle: u64) -> i128 {
+        Self::require_initialized(&env);
         read_pending_fees(&env, cycle)
     }
 
     pub fn get_total_collected(env: Env) -> i128 {
+        Self::require_initialized(&env);
         read_total_collected(&env)
     }
 
     pub fn get_total_released(env: Env) -> i128 {
+        Self::require_initialized(&env);
         read_total_released(&env)
     }
 
     pub fn get_total_batch_calls(env: Env) -> u64 {
+        Self::require_initialized(&env);
         read_total_batch_calls(&env)
     }
 
-    pub fn preview_batch_fee(env: Env
+    pub fn preview_batch_fee(env: Env, _payer: Address, amounts: Vec<i128>) -> i128 {
+        let mut total: i128 = 0;
+        for amount in amounts.iter() {
+            total = total.checked_add(amount).unwrap_or(0);
+        }
+        total
+    }
+
+    fn require_unlocked(env: &Env) {
+        if read_locked(env) {
+            panic_with_error!(env, FeeContractError::Locked);
+        }
+    }
+
+    fn require_initialized(env: &Env) {
+        if !has_admin(env) {
+            panic!("Contract not initialized");
+        }
+    }
+
+    fn require_admin(env: &Env, admin: &Address) {
+        require_admin(env, admin);
+    }
+}

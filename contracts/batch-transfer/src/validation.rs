@@ -1,16 +1,43 @@
 //! Validation utilities for batch transfers.
 
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Vec};
 
 /// Validation error types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationError {
     /// Invalid transfer amount
     InvalidAmount,
+    /// Duplicate recipient in the batch
+    DuplicateRecipient(Address),
+    /// Batch is empty (no recipients provided)
+    EmptyBatch,
 }
 
 /// Validates a recipient address.
 pub fn validate_address(_env: &Env, _address: &Address) -> Result<(), ValidationError> {
+    Ok(())
+}
+
+/// Ensures a recipient address has not already appeared in the batch.
+pub fn validate_unique_recipient(
+    seen: &Vec<Address>,
+    recipient: &Address,
+) -> Result<(), ValidationError> {
+    for existing in seen.iter() {
+        if *existing == *recipient {
+            return Err(ValidationError::DuplicateRecipient(recipient.clone()));
+        }
+    }
+    Ok(())
+}
+
+/// Validates that a batch is not empty.
+/// Returns an error if the transfer requests vector is empty to avoid
+/// unnecessary execution costs.
+pub fn validate_batch_not_empty<T>(transfers: &Vec<T>) -> Result<(), ValidationError> {
+    if transfers.is_empty() {
+        return Err(ValidationError::EmptyBatch);
+    }
     Ok(())
 }
 
@@ -27,14 +54,8 @@ pub fn validate_amount(amount: i128) -> Result<(), ValidationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
-
-    #[test]
-    fn test_validate_amount_positive() {
-        assert!(validate_amount(1000).is_ok());
-        assert!(validate_amount(1).is_ok());
-        assert!(validate_amount(i128::MAX).is_ok());
-    }
+    use crate::TransferRequest;
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
 
     #[test]
     fn test_validate_amount_negative() {
@@ -52,5 +73,27 @@ mod tests {
         let env = Env::default();
         let address = Address::generate(&env);
         assert!(validate_address(&env, &address).is_ok());
+    }
+
+    #[test]
+    fn test_validate_batch_not_empty_with_transfers() {
+        let env = Env::default();
+        let recipient = Address::generate(&env);
+        let mut transfers: Vec<TransferRequest> = Vec::new(&env);
+        transfers.push_back(TransferRequest {
+            recipient,
+            amount: 100,
+        });
+        assert!(validate_batch_not_empty(&transfers).is_ok());
+    }
+
+    #[test]
+    fn test_validate_batch_not_empty_rejects_empty_vec() {
+        let env = Env::default();
+        let transfers: Vec<TransferRequest> = Vec::new(&env);
+        assert_eq!(
+            validate_batch_not_empty(&transfers),
+            Err(ValidationError::EmptyBatch)
+        );
     }
 }

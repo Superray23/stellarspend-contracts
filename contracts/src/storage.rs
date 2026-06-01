@@ -20,10 +20,10 @@ pub struct FeeLog {
 }
 
 #[derive(Clone)]
-#[contracttype]
 pub enum DataKey {
     FeeLogCount,
     FeeLog(u64),
+    UserProfile(Address),
 }
 
 pub fn append_fee_log(
@@ -111,4 +111,17 @@ pub fn remove_user_fee_override(env: &Env, user: Address) {
     env.storage()
         .persistent()
         .remove(&DataKey::UserFeeOverride(user));
+} // ========== USER PROFILE STORAGE (Issues #324 & #323) ==========
+
+pub fn set_user_profile(env: &Env, user: Address, data: String) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserProfile(user.clone()), &data);
+}
+
+pub fn get_user_profile(env: &Env, user: Address) -> String {
+    env.storage()
+        .persistent()
+        .get(&DataKey::UserProfile(user))
+        .unwrap_or("".to_string())
 }

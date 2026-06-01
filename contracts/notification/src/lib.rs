@@ -61,4 +61,15 @@ impl NotificationContract {
             || lang == &String::from_str("es")
             || lang == &String::from_str("de")
     }
+
+    use crate::notifications::budget_notifier::BudgetNotifier;
+
+pub fn update_budget(env: Env, used: i128, limit: i128) {
+    BudgetNotifier::check_usage(&env, used, limit);
+}
+
+pub fn complete_goal(env: Env) {
+    BudgetNotifier::goal_completed(&env);
+}
+
 }

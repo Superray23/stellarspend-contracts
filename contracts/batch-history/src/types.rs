@@ -14,3 +14,4 @@ pub struct UserHistory {
     pub user: Address,
     pub transactions: Vec<TransactionRecord>,
 }
+//pub struct BatchHistoryContract;
