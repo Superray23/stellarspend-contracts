@@ -27,6 +27,8 @@ pub struct SavingsGoalRequest {
     pub initial_contribution: i128,
     /// Optional lock duration in seconds (0 = no lock, withdrawals allowed immediately)
     pub lock_duration_seconds: u64,
+    /// Expiration duration in seconds (0 = no expiration)
+    pub expiration_seconds: u64,
 }
 
 /// Represents a created savings goal.
@@ -53,6 +55,8 @@ pub struct SavingsGoal {
     pub is_complete: bool,
     /// Timestamp after which withdrawals are allowed (0 = no lock)
     pub unlock_at: u64,
+    /// Timestamp after which the goal expires (0 = no expiration)
+    pub expires_at: u64,
 }
 
 /// Represents progress information for a savings goal.

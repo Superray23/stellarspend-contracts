@@ -38,6 +38,7 @@ fn create_valid_request(
         deadline: current_ledger + 1000,
         initial_contribution: amount / 10, // 10% initial contribution
         lock_duration_seconds: 0,
+        expiration_seconds: 0,
     }
 }
 
@@ -74,6 +75,7 @@ fn test_auto_milestone_events() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 25_000_000,
         lock_duration_seconds: 0,
+        expiration_seconds: 0,
     });
     let result = client.batch_set_savings_goals(&admin, &requests);
     assert_eq!(result.successful, 1);
@@ -958,6 +960,7 @@ fn test_locked_goal_rejects_withdrawal() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 50_000_000,
         lock_duration_seconds: 86_400,
+        expiration_seconds: 0,
     });
     client.batch_set_savings_goals(&admin, &requests);
 
@@ -982,6 +985,7 @@ fn test_unlocked_goal_allows_withdrawal() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 50_000_000,
         lock_duration_seconds: 0,
+        expiration_seconds: 0,
     });
     client.batch_set_savings_goals(&admin, &requests);
 
@@ -1003,6 +1007,7 @@ fn test_withdrawal_allowed_after_lock_expires() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 50_000_000,
         lock_duration_seconds: 3_600,
+        expiration_seconds: 0,
     });
     client.batch_set_savings_goals(&admin, &requests);
 
@@ -1051,6 +1056,7 @@ fn test_contribute_emits_milestone_events() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 0,
         lock_duration_seconds: 0,
+        expiration_seconds: 0,
     });
     client.batch_set_savings_goals(&admin, &requests);
 
@@ -1080,6 +1086,7 @@ fn test_clone_savings_goal() {
         deadline: env.ledger().sequence() as u64 + 1000,
         initial_contribution: 50_000_000,
         lock_duration_seconds: 3600,
+        expiration_seconds: 0,
     });
     client.batch_set_savings_goals(&admin, &requests);
 

@@ -62,6 +62,8 @@ pub enum SavingsGoalError {
     GoalNotFound = 10,
     /// Goal is locked against withdrawals
     GoalLocked = 11,
+    /// Goal has expired
+    GoalExpired = 12,
 }
 
 impl From<SavingsGoalError> for soroban_sdk::Error {
@@ -360,6 +362,7 @@ impl SavingsGoalsContract {
                         is_active: true,
                         is_complete,
                         unlock_at,
+                        expires_at,
                     };
 
                     // Accumulate metrics
@@ -506,6 +509,18 @@ impl SavingsGoalsContract {
         if goal.user != caller {
             panic_with_error!(&env, SavingsGoalError::Unauthorized);
         }
+
+        // Check if goal has expired
+        let current_time = env.ledger().timestamp();
+        if goal.expires_at > 0 && current_time >= goal.expires_at {
+            // Mark goal as inactive
+            goal.is_active = false;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Goal(goal_id), &goal);
+            panic_with_error!(&env, SavingsGoalError::GoalExpired);
+        }
+
         if !goal.is_active {
             panic_with_error!(&env, SavingsGoalError::GoalNotActive);
         }
@@ -567,6 +582,18 @@ impl SavingsGoalsContract {
             0
         };
 
+        // Inherit expiration duration if it was originally set
+        let expiration_duration = if existing_goal.expires_at > existing_goal.created_at {
+            existing_goal.expires_at - existing_goal.created_at
+        } else {
+            0
+        };
+        let expires_at = if expiration_duration > 0 {
+            created_at.saturating_add(expiration_duration)
+        } else {
+            0
+        };
+
         let new_goal = SavingsGoal {
             goal_id: goal_id_counter,
             user: caller.clone(),
@@ -578,6 +605,7 @@ impl SavingsGoalsContract {
             is_active: true,
             is_complete: false,
             unlock_at,
+            expires_at,
         };
 
         // Store the goal
