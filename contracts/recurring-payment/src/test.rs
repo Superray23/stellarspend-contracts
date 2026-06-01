@@ -1,4 +1,4 @@
-#![cfg(test)]
+﻿#![cfg(test)]
 
 use super::*;
 use soroban_sdk::testutils::{Address as _, Ledger};
@@ -122,4 +122,118 @@ fn test_execute_with_delay() {
     assert_eq!(payment.next_execution, start_time + 3 * interval);
     assert_eq!(token_client.balance(&recipient), 1000);
     assert_eq!(payment.execution_count, 1);
+
+    #[test]
+    fn test_missed_payment_increments_count() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token.address();
+
+        // Fund sender with less than required amount
+        let token_client = token::StellarAssetClient::new(&env, &token_address);
+        token_client.mint(&sender, &50);
+
+        let contract_id = env.register(RecurringPaymentContract, ());
+        let client = RecurringPaymentContractClient::new(&env, &contract_id);
+
+        let payment_id = client.create_payment(
+            &sender,
+            &recipient,
+            &token_address,
+            &100,
+            &3600,
+            &0,
+        );
+
+        // Try to execute with insufficient funds — should panic
+        let result = std::panic::catch_unwind(|| {
+            client.execute_payment(&payment_id);
+        });
+        assert!(result.is_err());
+
+        // Check missed_count incremented
+        let payment = client.get_payment(&payment_id);
+        assert_eq!(payment.missed_count, 1);
+        assert!(payment.last_missed_at > 0);
+    }
+
+    #[test]
+    fn test_successful_execution_resets_missed_count() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token.address();
+
+        let token_client = token::StellarAssetClient::new(&env, &token_address);
+
+        let contract_id = env.register(RecurringPaymentContract, ());
+        let client = RecurringPaymentContractClient::new(&env, &contract_id);
+
+        let payment_id = client.create_payment(
+            &sender,
+            &recipient,
+            &token_address,
+            &100,
+            &3600,
+            &0,
+        );
+
+        // First cause a miss with insufficient funds
+        token_client.mint(&sender, &50);
+        let _ = std::panic::catch_unwind(|| {
+            client.execute_payment(&payment_id);
+        });
+
+        // Now fund properly and execute successfully
+        token_client.mint(&sender, &200);
+        client.execute_payment(&payment_id);
+
+        // missed_count should be reset to 0
+        let payment = client.get_payment(&payment_id);
+        assert_eq!(payment.missed_count, 0);
+        assert_eq!(payment.last_missed_at, 0);
+    }
+
+    #[test]
+    fn test_missed_count_increments_multiple_times() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token.address();
+
+        let token_client = token::StellarAssetClient::new(&env, &token_address);
+        token_client.mint(&sender, &10); // not enough for 100
+
+        let contract_id = env.register(RecurringPaymentContract, ());
+        let client = RecurringPaymentContractClient::new(&env, &contract_id);
+
+        let payment_id = client.create_payment(
+            &sender,
+            &recipient,
+            &token_address,
+            &100,
+            &1,
+            &0,
+        );
+
+        // Miss twice
+        let _ = std::panic::catch_unwind(|| { client.execute_payment(&payment_id); });
+        let _ = std::panic::catch_unwind(|| { client.execute_payment(&payment_id); });
+
+        let payment = client.get_payment(&payment_id);
+        assert_eq!(payment.missed_count, 2);
+    }
 }

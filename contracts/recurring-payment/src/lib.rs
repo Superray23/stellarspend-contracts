@@ -1,4 +1,4 @@
-#![no_std]
+﻿#![no_std]
 
 #[cfg(test)]
 mod test;
@@ -58,6 +58,8 @@ impl RecurringPaymentContract {
             next_execution: start_time,
             active: true,
             execution_count: 0,
+            missed_count: 0,
+            last_missed_at: 0,
         };
 
         env.storage()
@@ -91,9 +93,27 @@ impl RecurringPaymentContract {
             panic!("Too early for next execution");
         }
 
-        // Transfer tokens from sender to recipient.
+        // Attempt token transfer; track missed execution on failure
         let token_client = token::Client::new(&env, &payment.token);
+        let sender_balance = token_client.balance(&payment.sender);
+        if sender_balance < payment.amount {
+            // Track the missed execution
+            payment.missed_count += 1;
+            payment.last_missed_at = env.ledger().timestamp();
+            env.storage()
+                .instance()
+                .set(&DataKey::Payment(payment_id), &payment);
+            env.events().publish(
+                (symbol_short!("recur"), symbol_short!("missed"), payment_id),
+                (payment.missed_count, payment.last_missed_at),
+            );
+            panic!("Insufficient funds for payment");
+        }
         token_client.transfer(&payment.sender, &payment.recipient, &payment.amount);
+
+        // Reset missed count on successful execution
+        payment.missed_count = 0;
+        payment.last_missed_at = 0;
 
         // Update next execution time
         payment.next_execution += payment.interval;
@@ -346,3 +366,5 @@ impl RecurringPaymentContract {
             .unwrap_or(Vec::new(&env))
     }
 }
+
+
