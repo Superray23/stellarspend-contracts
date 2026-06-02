@@ -2,13 +2,16 @@
 
 #![cfg(test)]
 
+extern crate alloc;
+
 use crate::{SpendingLimitsContract, SpendingLimitsContractClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger},
-    Address, Env, Vec,
+    testutils::{Address as _, Events, Ledger},
+    Address, Env, Symbol, Vec,
 };
 
+use alloc::format;
 use crate::types::{ErrorCode, LimitStrategy, LimitUpdateResult, SpendingLimitRequest};
 
 /// Helper function to create a test environment with initialized contract.
@@ -455,11 +458,11 @@ fn test_enforce_spending_limit_resets_after_window() {
 
     // Use the starting window
     env.ledger().set_timestamp(0);
-    client.enforce_spending_limit(&user, &10);
+    client.enforce_spending_limit(&user, &10, &None::<Symbol>);
 
     // Advance past the configured reset window and verify the counter resets.
     env.ledger().set_timestamp(86_401);
-    client.enforce_spending_limit(&user, &10);
+    client.enforce_spending_limit(&user, &10, &None::<Symbol>);
 }
 
 #[test]
@@ -483,14 +486,14 @@ fn test_enforce_spending_limit_daily_exceeded() {
     client.enforce_spending_limit(&user, &5, &None::<Symbol>);
     client.enforce_spending_limit(&user, &1, &None::<Symbol>);
     // 2 * 5 is allowed.
-    client.enforce_spending_limit(&user, &5);
-    client.enforce_spending_limit(&user, &5);
+    client.enforce_spending_limit(&user, &5, &None::<Symbol>);
+    client.enforce_spending_limit(&user, &5, &None::<Symbol>);
 
     let limit = client.get_spending_limit(&user).unwrap();
     assert_eq!(limit.current_spending, 10);
 
     // The third spend pushes daily total above 10 and should panic.
-    client.enforce_spending_limit(&user, &1);
+    client.enforce_spending_limit(&user, &1, &None::<Symbol>);
 }
 
 #[test]
@@ -702,10 +705,10 @@ fn test_enforce_spending_limit_hourly_exceeded() {
     env.ledger().set_timestamp(3600); // 1 hour
 
     // Spend of 5 is allowed.
-    client.enforce_spending_limit(&user, &5);
+    client.enforce_spending_limit(&user, &5, &None::<Symbol>);
 
     // This second spend in the same hour exceeds hourly limit of 5 and should panic.
-    client.enforce_spending_limit(&user, &1);
+    client.enforce_spending_limit(&user, &1, &None::<Symbol>);
 }
 
 #[test]
@@ -722,13 +725,16 @@ fn test_enforce_spending_limit_hourly_resets() {
     env.ledger().set_timestamp(3600); // hour 1
 
     // Spend of 5 is allowed.
-    client.enforce_spending_limit(&user, &5);
+    client.enforce_spending_limit(&user, &5, &None::<Symbol>);
 
     // Advance 1 hour and 1 second.
     env.ledger().set_timestamp(3600 + 3601); // hour 2
 
     // Another spend of 5 is allowed now because the hourly window has reset.
-    client.enforce_spending_limit(&user, &5);
+    client.enforce_spending_limit(&user, &5, &None::<Symbol>);
+}
+
+#[test]
 fn test_adaptive_strategy_increases_limit_near_usage_threshold() {
     let (env, admin, client) = setup_test_contract();
     let user = Address::generate(&env);
@@ -744,7 +750,7 @@ fn test_adaptive_strategy_increases_limit_near_usage_threshold() {
     env.ledger().set_timestamp(86_400);
 
     // Spend 900M (90% of 1B) — should trigger a deterministic 10% limit increase.
-    client.enforce_spending_limit(&user, &900_000_000);
+    client.enforce_spending_limit(&user, &900_000_000, &None::<Symbol>);
 
     let limit = client.get_spending_limit(&user).unwrap();
     assert_eq!(limit.monthly_limit, 1_100_000_000);
@@ -907,5 +913,4 @@ fn test_override_changes_enforcement_limit() {
         .unwrap();
 
     assert_eq!(updated.monthly_limit, 500);
-}
 }

@@ -1,7 +1,5 @@
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
-
 /// Maximum number of user-limit pairs in a single batch for optimization.
 /// Maximum number of requests in a single batch for optimization.
 pub const MAX_BATCH_SIZE: u32 = 100;
@@ -187,8 +185,6 @@ pub enum DataKey {
     HourlySpending(Address, u64),
     /// Per-user daily spending for a given logical day identifier.
     DailySpending(Address, u64),
-    /// Per-user monthly spending for a given logical month identifier.
-    MonthlySpending(Address, u64),
     /// Exception rule for a specific user+category pair
     ExceptionRule(Address, Symbol),
     /// Admin-approved categories eligible for exception rules
@@ -275,7 +271,7 @@ impl LimitEvents {
         remaining_monthly: i128,
     ) {
         env.events().publish(
-            topics,
+            (symbol_short!("limit"), symbol_short!("exceeded")),
             (
                 user.clone(),
                 attempted_amount,
@@ -283,8 +279,6 @@ impl LimitEvents {
                 remaining_daily,
                 remaining_monthly,
             ),
-            (symbol_short!("limit"), symbol_short!("exceeded")),
-            (user.clone(), amount, remaining_window, remaining_monthly),
         );
     }
 
