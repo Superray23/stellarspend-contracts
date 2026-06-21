@@ -23,6 +23,7 @@ pub struct RecurringPayment {
     pub interval: u64,
     pub next_execution: u64,
     pub active: bool,
+    pub paused: bool,
     pub execution_count: u32,
     pub missed_count: u32,
     pub last_missed_at: u64,

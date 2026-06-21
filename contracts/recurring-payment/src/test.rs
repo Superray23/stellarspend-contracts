@@ -56,6 +56,7 @@ fn test_recurring_payment_flow() {
     assert_eq!(payment.amount, amount);
     assert_eq!(payment.next_execution, start_time);
     assert!(payment.active);
+    assert!(!payment.paused);
     assert_eq!(payment.execution_count, 0);
     assert_eq!(payment.missed_count, 0);
     assert_eq!(payment.last_missed_at, 0);
@@ -81,6 +82,90 @@ fn test_recurring_payment_flow() {
 
     env.ledger().set_timestamp(start_time + interval);
     // client.execute_payment(&payment_id); // should panic
+}
+
+#[test]
+#[should_panic(expected = "Payment is paused")]
+fn test_paused_schedule_does_not_execute() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let (token_addr, _token_client, token_admin_client) = create_token_contract(&env, &admin);
+    let amount = 1000i128;
+    let interval = 3600u64;
+    let start_time = 1000u64;
+
+    token_admin_client.mint(&sender, &5000i128);
+
+    let contract_id = env.register(RecurringPaymentContract, ());
+    let client = RecurringPaymentContractClient::new(&env, &contract_id);
+
+    let payment_id = client.create_payment(
+        &sender,
+        &recipient,
+        &token_addr,
+        &amount,
+        &interval,
+        &start_time,
+    );
+
+    client.pause_payment(&payment_id);
+    let paused_payment = client.get_payment(&payment_id);
+    assert!(paused_payment.paused);
+    assert!(paused_payment.active);
+
+    env.ledger().set_timestamp(start_time);
+    client.execute_payment(&payment_id);
+}
+
+#[test]
+fn test_resume_restores_execution_after_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let (token_addr, token_client, token_admin_client) = create_token_contract(&env, &admin);
+    let amount = 1000i128;
+    let interval = 3600u64;
+    let start_time = 1000u64;
+
+    token_admin_client.mint(&sender, &5000i128);
+
+    let contract_id = env.register(RecurringPaymentContract, ());
+    let client = RecurringPaymentContractClient::new(&env, &contract_id);
+
+    let payment_id = client.create_payment(
+        &sender,
+        &recipient,
+        &token_addr,
+        &amount,
+        &interval,
+        &start_time,
+    );
+
+    client.pause_payment(&payment_id);
+    client.resume_payment(&payment_id);
+
+    let resumed_payment = client.get_payment(&payment_id);
+    assert!(!resumed_payment.paused);
+    assert!(resumed_payment.active);
+
+    env.ledger().set_timestamp(start_time);
+    client.execute_payment(&payment_id);
+
+    assert_eq!(token_client.balance(&sender), 4000);
+    assert_eq!(token_client.balance(&recipient), 1000);
+
+    let payment_after_resume = client.get_payment(&payment_id);
+    assert_eq!(payment_after_resume.execution_count, 1);
+    assert_eq!(payment_after_resume.next_execution, start_time + interval);
 }
 
 #[test]
