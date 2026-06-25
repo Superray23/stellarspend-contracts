@@ -32,6 +32,7 @@ members = [
     "contracts/budget",
     "contracts/category-analytics",
     "contracts/spending-categories",
+    "contracts/user",
     "contracts/users",
     "contracts/transactional",
     "contracts/transactions",

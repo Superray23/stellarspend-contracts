@@ -1,3 +1,11 @@
+//! # Deprecated — use the `users` crate instead
+//!
+//! This crate is a legacy stub that predates the full implementation in
+//! `contracts/users`. It exists for historical reference only and **must not**
+//! receive new features or be depended upon by other contracts.
+//!
+//! See `docs/user-vs-users-crates.md` for the authoritative decision record.
+
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Map};

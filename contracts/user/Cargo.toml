@@ -1,0 +1,15 @@
+[package]
+name = "user"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Deprecated legacy stub — see contracts/users for the canonical implementation"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
