@@ -1,3 +1,36 @@
+//! # Fee Escrow — Internal Bookkeeping Module
+//!
+//! ╔══════════════════════════════════════════════════════════════════════╗
+//! ║  THIS IS NOT A REAL ESCROW CONTRACT                                ║
+//! ║  See `contracts/escrow/src/lib.rs` for the standalone escrow       ║
+//! ║  contract that manages individual depositor↔recipient escrows.     ║
+//! ╚══════════════════════════════════════════════════════════════════════╝
+//!
+//! This module is **internal** to the Fee contract (`crate::escrow`). It
+//! provides pooled fee-collection bookkeeping, **not** per-party escrows.
+//!
+//! ## What it does
+//!
+//! - `collect_to_escrow` / `collect_batch_to_escrow` — transfer tokens from
+//!   a payer into the Fee contract and increment internal counters
+//!   (`escrow_balance`, `pending_fees` per cycle, `total_collected`).
+//! - `release_cycle_fees` — sweep a cycle's pending fees to the treasury
+//!   and decrement `escrow_balance`.
+//! - `rollover_cycle_fees` — carry forward pending fees to a later cycle.
+//!
+//! ## Relationship to `contracts/escrow`
+//!
+//! | Aspect              | Fee escrow (this module)      | Standalone escrow crate       |
+//! |---------------------|-------------------------------|-------------------------------|
+//! | Scope               | Internal Fee contract module  | Deployable Soroban contract   |
+//! | Granularity         | Pooled (one balance counter)  | Per-escrow records            |
+//! | Parties             | Payer → Fee treasury          | Depositor → Recipient         |
+//! | Reversal            | No individual reversal        | Batch release/reversal        |
+//! | Lifecycle tracking  | Per-cycle pending fees only   | Per-escrow status (Active/…)  |
+//!
+//! The two are **independent** — the Fee contract never imports or calls
+//! the standalone escrow crate, and vice versa.
+
 use shared::utils::validate_amount as validate_non_negative_amount;
 use soroban_sdk::{panic_with_error, token, Address, Env, Vec};
 

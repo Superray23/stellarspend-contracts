@@ -1,7 +1,14 @@
-//! # Escrow Contract with Batch Reversal
+//! # Standalone Escrow Contract
 //!
-//! This contract provides escrow functionality with batch reversal capabilities
-//! for handling failed transactions.
+//! ╔══════════════════════════════════════════════════════════════════════╗
+//! ║  This is the REAL escrow contract for individual depositor↔recipient║
+//! ║  escrows. The Fee crate (`contracts/fee/src/escrow.rs`) has an      ║
+//! ║  **internal** module that shares the "escrow" name but only tracks  ║
+//! ║  pooled fee collection — it is NOT an escrow contract.              ║
+//! ╚══════════════════════════════════════════════════════════════════════╝
+//!
+//! This contract provides per-escrow lifecycle management (create, release,
+//! reverse) with batch operations and full event emission.
 #![no_std]
 
 mod types;
