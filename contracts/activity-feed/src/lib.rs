@@ -86,4 +86,5 @@ impl ActivityFeedContract {
             .get(&DataKey::TotalEvents)
             .unwrap_or(0)
     }
-}
+}
+

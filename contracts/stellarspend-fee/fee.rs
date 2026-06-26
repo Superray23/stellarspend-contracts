@@ -39,6 +39,7 @@ impl PriorityLevel {
             _ => None,
         }
     }
+}
 
 use soroban_sdk::{contractimpl, contracttype, Address, Env, Vec};
 pub use storage::{FeeLog, FeeLogKind};
