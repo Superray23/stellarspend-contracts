@@ -42,7 +42,8 @@ impl ActivityFeedContract {
 
         env.storage().persistent().set(&DataKey::Event(seq), &event);
         env.storage().instance().set(&DataKey::TotalEvents, &seq);
-        env.events().publish((symbol_short!("activity"),), (event_type, seq));
+        env.events()
+            .publish((symbol_short!("activity"),), (event_type, seq));
         seq
     }
 
@@ -55,7 +56,11 @@ impl ActivityFeedContract {
             .get(&DataKey::TotalEvents)
             .unwrap_or(0);
 
-        let size = if page_size == 0 || page_size > 50 { 20 } else { page_size };
+        let size = if page_size == 0 || page_size > 50 {
+            20
+        } else {
+            page_size
+        };
         let p = if page == 0 { 1 } else { page };
         let end = total.saturating_sub((p - 1) * size);
         let start = end.saturating_sub(size) + 1;
@@ -66,7 +71,9 @@ impl ActivityFeedContract {
             if let Some(ev) = env.storage().persistent().get(&DataKey::Event(i)) {
                 results.push_back(ev);
             }
-            if i == 0 { break; }
+            if i == 0 {
+                break;
+            }
             i -= 1;
         }
         results
@@ -74,6 +81,9 @@ impl ActivityFeedContract {
 
     /// Get the total number of recorded events.
     pub fn total_events(env: Env) -> u64 {
-        env.storage().instance().get(&DataKey::TotalEvents).unwrap_or(0)
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalEvents)
+            .unwrap_or(0)
     }
-}
+}

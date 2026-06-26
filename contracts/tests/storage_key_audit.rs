@@ -1,6 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::collections::{HashSet, HashMap};
 
 fn visit_dirs(dir: &Path, cb: &mut dyn FnMut(&std::fs::DirEntry)) -> std::io::Result<()> {
     if dir.is_dir() {
@@ -30,7 +30,9 @@ fn test_storage_key_collisions() {
                     let mut in_enum = false;
                     for line in content.lines() {
                         let trimmed = line.trim();
-                        if trimmed.starts_with("pub enum DataKey {") || trimmed.starts_with("enum DataKey {") {
+                        if trimmed.starts_with("pub enum DataKey {")
+                            || trimmed.starts_with("enum DataKey {")
+                        {
                             in_enum = true;
                             continue;
                         }
@@ -40,22 +42,36 @@ fn test_storage_key_collisions() {
                         }
                         if in_enum && !trimmed.is_empty() {
                             // Simple extraction of variant name (before '(' or ',')
-                            let variant = trimmed.split('(').next().unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
+                            let variant = trimmed
+                                .split('(')
+                                .next()
+                                .unwrap_or("")
+                                .split(',')
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string();
                             if !variant.is_empty() && !variant.starts_with("//") {
-                                key_locations.entry(variant.clone()).or_insert_with(Vec::new).push(path.display().to_string());
+                                key_locations
+                                    .entry(variant.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(path.display().to_string());
                             }
                         }
-                        
+
                         // Check for const STORAGE_KEY
                         if trimmed.starts_with("const STORAGE_KEY") {
-                            key_locations.entry(trimmed.to_string()).or_insert_with(Vec::new).push(path.display().to_string());
+                            key_locations
+                                .entry(trimmed.to_string())
+                                .or_insert_with(Vec::new)
+                                .push(path.display().to_string());
                         }
                     }
                 }
             }
         }
     };
-    
+
     // Visit from root or contracts dir
     visit_dirs(Path::new("contracts"), &mut cb).unwrap();
 
@@ -70,14 +86,14 @@ fn test_storage_key_collisions() {
             collisions.push(format!("Key '{}' found in {:?}", key, locations));
         }
     }
-    
+
     // Output the report
     if !collisions.is_empty() {
         println!("Storage key collisions/duplicates found:");
         for c in &collisions {
             println!("{}", c);
         }
-        // Depending on strictness, we could assert, but let's just make it a test that prints it out for now, 
+        // Depending on strictness, we could assert, but let's just make it a test that prints it out for now,
         // wait the prompt says "Check for duplicates and report findings", I'll assert so it shows in test results or just print.
         // I will assert to make it an active check.
         // Actually, there are probably many duplicates right now.

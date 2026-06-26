@@ -2,7 +2,11 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{testutils::{Ledger, LedgerInfo}, symbol_short, Env, Symbol};
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Ledger, LedgerInfo},
+    Env, Symbol,
+};
 use std::format;
 
 fn setup_env() -> Env {

@@ -289,7 +289,13 @@ fn test_collect_fee_batch_zero_amount_panics() {
 // `contracts/escrow/src/lib.rs`, which manages individual depositor↔recipient
 // escrows.
 
-fn setup_with_real_token() -> (Env, Address, token::Client<'static>, token::StellarAssetClient<'static>, FeeContractClient<'static>) {
+fn setup_with_real_token() -> (
+    Env,
+    Address,
+    token::Client<'static>,
+    token::StellarAssetClient<'static>,
+    FeeContractClient<'static>,
+) {
     let env = Env::default();
     env.mock_all_auths();
 

@@ -68,9 +68,15 @@ fn test_batch_transfer() {
     let events = env.events().all();
     let receipt_topic = Symbol::new(&env, "receipt");
     let receipt_found = events.iter().any(|event| {
-        event.topics.get(0).map_or(false, |topic| topic == receipt_topic.clone().into())
+        event
+            .topics
+            .get(0)
+            .map_or(false, |topic| topic == receipt_topic.clone().into())
     });
-    assert!(receipt_found, "Receipt event should be emitted after successful batch payment");
+    assert!(
+        receipt_found,
+        "Receipt event should be emitted after successful batch payment"
+    );
 }
 
 #[test]
