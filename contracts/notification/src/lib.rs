@@ -3,7 +3,7 @@
 mod types;
 mod errors;
 
-use soroban_sdk::{contract, contractimpl, Env, Vec, String, Address, Symbol};
+use soroban_sdk::{contract, contractimpl, Env, Vec, String, Symbol};
 use types::{Notification, NotificationResult};
 use errors::NotificationError;
 
