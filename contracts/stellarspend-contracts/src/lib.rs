@@ -1,6 +1,6 @@
-//! Workspace crate for `contracts/src/auth.rs` (multi-sig helpers).
+//! Workspace crate for `contracts/stellarspend-fee/auth.rs` (multi-sig helpers).
 
-#[path = "../../src/auth.rs"]
+#[path = "../../stellarspend-fee/auth.rs"]
 pub mod auth;
 
 pub use auth::*;

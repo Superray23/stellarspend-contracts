@@ -17,6 +17,7 @@ members = [
     "contracts/budget",
     "contracts/budget-recommendations",
     "contracts/fee",
+    "contracts/stellarspend-fee",
     "contracts/shared-budgets",
     "contracts/multi-currency-wallet",
     "contracts/spending-limits",

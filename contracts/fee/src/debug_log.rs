@@ -1,3 +1,5 @@
+#![cfg(any(test, feature = "testutils"))]
+
 use soroban_sdk::{Env, String as SorobanString};
 
 pub fn log_fee_event(env: &Env, label: &str, amount: i128) {
