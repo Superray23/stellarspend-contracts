@@ -164,3 +164,103 @@ impl DelegationContract {
         env.storage().persistent().get(&key)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::Address as _,
+        Address,
+        Env,
+    };
+
+    #[test]
+    fn grant_delegation_creates_allowance() {
+        let env = Env::default();
+
+        let owner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        DelegationContract::set_delegation(
+            env.clone(),
+            owner.clone(),
+            delegate.clone(),
+            1_000,
+        );
+
+        let delegation =
+            DelegationContract::get_delegation(
+                env,
+                owner,
+                delegate,
+            )
+            .unwrap();
+
+        assert_eq!(delegation.limit, 1_000);
+        assert_eq!(delegation.spent, 0);
+    }
+
+    #[test]
+    fn revoke_delegation_removes_allowance() {
+        let env = Env::default();
+
+        let owner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        DelegationContract::set_delegation(
+            env.clone(),
+            owner.clone(),
+            delegate.clone(),
+            1_000,
+        );
+
+        DelegationContract::revoke_delegation(
+            env.clone(),
+            owner.clone(),
+            delegate.clone(),
+        );
+
+        let delegation =
+            DelegationContract::get_delegation(
+                env,
+                owner,
+                delegate,
+            );
+
+        assert!(delegation.is_none());
+    }
+
+    #[test]
+    fn over_limit_spend_is_rejected() {
+        let env = Env::default();
+
+        let owner = Address::generate(&env);
+        let delegate = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        DelegationContract::set_delegation(
+            env.clone(),
+            owner.clone(),
+            delegate.clone(),
+            1_000,
+        );
+
+        let result =
+            DelegationContract::consume_allowance(
+                env,
+                owner,
+                delegate,
+                1_500,
+            );
+
+        assert_eq!(
+            result,
+            Err(DelegationError::AmountTooLarge)
+        );
+    }
+}
