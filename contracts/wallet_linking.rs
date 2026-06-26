@@ -105,3 +105,60 @@ impl WalletLinkingContract {
             .get(&DataKey::WalletOwner(wallet))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    #[test]
+    fn test_wallet_linking_flow() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WalletLinkingContract);
+        let client = WalletLinkingContractClient::new(&env, &contract_id);
+
+        let user = Address::generate(&env);
+        let wallet = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        // Link wallet
+        client.link_wallet(&user, &wallet);
+
+        // Verify it's linked
+        let wallets = client.get_wallets(&user);
+        assert_eq!(wallets.len(), 1);
+        assert_eq!(wallets.get_unchecked(0), wallet.clone());
+
+        let owner = client.get_wallet_owner(&wallet);
+        assert_eq!(owner, Some(user.clone()));
+
+        // Unlink wallet
+        client.unlink_wallet(&user, &wallet);
+
+        let wallets_after = client.get_wallets(&user);
+        assert_eq!(wallets_after.len(), 0);
+
+        let owner_after = client.get_wallet_owner(&wallet);
+        assert_eq!(owner_after, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unauthorized unlink attempt")]
+    fn test_unauthorized_link_attempt() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WalletLinkingContract);
+        let client = WalletLinkingContractClient::new(&env, &contract_id);
+
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        let wallet = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        client.link_wallet(&user1, &wallet);
+
+        // Unauthorized attempt to unlink
+        client.unlink_wallet(&user2, &wallet);
+    }
+}
