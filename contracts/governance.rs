@@ -323,3 +323,104 @@ impl GovernanceContract {
             .get(&GovernanceDataKey::ConfigValue(config_key))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Address, Env, String,
+    };
+
+    fn setup() -> (Env, Address, GovernanceContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1000;
+        });
+
+        let contract_id = env.register(GovernanceContract, ());
+        let client = GovernanceContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin, &2);
+        (env, admin, client)
+    }
+
+    #[test]
+    fn test_proposal_lifecycle_create_vote_execute() {
+        let (env, _admin, client) = setup();
+
+        let proposer = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let key = String::from_str(&env, "max_fee");
+        let val = String::from_str(&env, "100");
+
+        let prop_id = client.create_proposal(&proposer, &key, &val, &86400);
+        assert_eq!(prop_id, 1);
+
+        client.vote_proposal(&voter1, &prop_id);
+        client.vote_proposal(&voter2, &prop_id);
+        client.execute_proposal(&voter1, &prop_id);
+
+        let proposal = client.get_proposal(&prop_id).unwrap();
+        assert!(proposal.executed);
+        assert_eq!(client.get_config(&key).unwrap(), val);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #8)")]
+    fn test_unauthorized_execution_without_enough_approvals() {
+        let (env, _admin, client) = setup();
+
+        let proposer = Address::generate(&env);
+        let voter = Address::generate(&env);
+        let key = String::from_str(&env, "max_fee");
+        let val = String::from_str(&env, "100");
+
+        let prop_id = client.create_proposal(&proposer, &key, &val, &86400);
+        client.vote_proposal(&voter, &prop_id);
+        client.execute_proposal(&proposer, &prop_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn test_unauthorized_execution_after_deadline() {
+        let (env, _admin, client) = setup();
+
+        let proposer = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let key = String::from_str(&env, "max_fee");
+        let val = String::from_str(&env, "100");
+        let duration = 3600_u64;
+
+        let prop_id = client.create_proposal(&proposer, &key, &val, &duration);
+        client.vote_proposal(&voter1, &prop_id);
+        client.vote_proposal(&voter2, &prop_id);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += duration + 1;
+        });
+
+        client.execute_proposal(&voter1, &prop_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #7)")]
+    fn test_unauthorized_execution_already_executed() {
+        let (env, _admin, client) = setup();
+
+        let proposer = Address::generate(&env);
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let key = String::from_str(&env, "max_fee");
+        let val = String::from_str(&env, "100");
+
+        let prop_id = client.create_proposal(&proposer, &key, &val, &86400);
+        client.vote_proposal(&voter1, &prop_id);
+        client.vote_proposal(&voter2, &prop_id);
+        client.execute_proposal(&voter1, &prop_id);
+        client.execute_proposal(&voter2, &prop_id);
+    }
+}

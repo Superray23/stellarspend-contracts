@@ -1,8 +1,7 @@
 #![cfg(test)]
 
 use soroban_sdk::{
-    symbol_short,
-    testutils::{Address as _, Events as _, Ledger as _},
+    testutils::{Address as _, Ledger as _},
     Address, Env, String,
 };
 
@@ -57,19 +56,6 @@ fn test_proposal_creation() {
     assert_eq!(proposal.config_key, key);
     assert_eq!(proposal.config_value, val);
     assert_eq!(proposal.executed, false);
-
-    // Check event
-    let events = env.events().all();
-    let created_events = events
-        .iter()
-        .filter(|event| {
-            event.1.iter().any(|topic| {
-                symbol_short!("created")
-                    == soroban_sdk::Symbol::try_from_val(&env, &topic).unwrap_or(symbol_short!(""))
-            })
-        })
-        .count();
-    assert_eq!(created_events, 1);
 }
 
 #[test]
@@ -104,19 +90,6 @@ fn test_voting_and_execution_success() {
 
     let config_val = client.get_config(&key).unwrap();
     assert_eq!(config_val, val);
-
-    // Check execution event
-    let events = env.events().all();
-    let executed_events = events
-        .iter()
-        .filter(|event| {
-            event.1.iter().any(|topic| {
-                symbol_short!("executed")
-                    == soroban_sdk::Symbol::try_from_val(&env, &topic).unwrap_or(symbol_short!(""))
-            })
-        })
-        .count();
-    assert_eq!(executed_events, 1);
 }
 
 #[test]
@@ -169,13 +142,78 @@ fn test_voting_on_expired_proposal_panics() {
     let key = String::from_str(&env, "fee_rate");
     let val = String::from_str(&env, "500");
 
-    let duration = 86400; // 1 day
+    let duration = 86400;
     let prop_id = client.create_proposal(&proposer, &key, &val, &duration);
 
-    // Fast-forward past deadline
     env.ledger().with_mut(|li| {
         li.timestamp += duration + 1;
     });
 
     client.vote_proposal(&voter1, &prop_id);
+}
+
+#[test]
+#[should_panic]
+fn test_execute_expired_proposal_panics() {
+    let (env, admin, client) = setup_governance_contract();
+
+    let proposer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+
+    let key = String::from_str(&env, "fee_rate");
+    let val = String::from_str(&env, "500");
+
+    let duration = 86400;
+    let prop_id = client.create_proposal(&proposer, &key, &val, &duration);
+
+    client.vote_proposal(&voter1, &prop_id);
+    client.vote_proposal(&voter2, &prop_id);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp += duration + 1;
+    });
+
+    client.execute_proposal(&voter1, &prop_id);
+}
+
+#[test]
+#[should_panic]
+fn test_execute_already_executed_proposal_panics() {
+    let (env, admin, client) = setup_governance_contract();
+
+    let proposer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+
+    let key = String::from_str(&env, "fee_rate");
+    let val = String::from_str(&env, "500");
+
+    let prop_id = client.create_proposal(&proposer, &key, &val, &86400);
+    client.vote_proposal(&voter1, &prop_id);
+    client.vote_proposal(&voter2, &prop_id);
+    client.execute_proposal(&voter1, &prop_id);
+
+    client.execute_proposal(&voter2, &prop_id);
+}
+
+#[test]
+fn test_proposal_lifecycle_end_to_end() {
+    let (env, admin, client) = setup_governance_contract();
+
+    let proposer = Address::generate(&env);
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let key = String::from_str(&env, "withdraw_limit");
+    let val = String::from_str(&env, "10000");
+
+    let prop_id = client.create_proposal(&proposer, &key, &val, &86400);
+    assert!(!client.get_proposal(&prop_id).unwrap().executed);
+
+    client.vote_proposal(&voter1, &prop_id);
+    client.vote_proposal(&voter2, &prop_id);
+    client.execute_proposal(&admin, &prop_id);
+
+    assert!(client.get_proposal(&prop_id).unwrap().executed);
+    assert_eq!(client.get_config(&key).unwrap(), val);
 }

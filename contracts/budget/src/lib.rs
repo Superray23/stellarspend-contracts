@@ -21,19 +21,20 @@ use soroban_sdk::{
 };
 
 pub use storage::{
-    BudgetCheckpoint, BudgetConfigVersion, BudgetFreeze, BudgetTemplate, CategoryBudget,
-    CategoryTransfer, DataKey, SpendingWindow, UserBudget, DEFAULT_FREEZE_DURATION_SECONDS,
-    RAPID_SPEND_THRESHOLD, RAPID_SPEND_WINDOW_SECONDS,
+    BudgetCheckpoint, BudgetConfigVersion, BudgetFreeze, BudgetSuspension, BudgetTemplate,
+    CategoryBudget, CategoryTransfer, DataKey, SpendingWindow, UserBudget,
+    DEFAULT_FREEZE_DURATION_SECONDS, RAPID_SPEND_THRESHOLD, RAPID_SPEND_WINDOW_SECONDS,
 };
 
 pub use types::Beneficiary;
 
 use storage::{
-    clear_budget_freeze, delete_template, get_budget_config_history, get_budget_config_version,
-    get_budget_freeze, get_category_available, get_template, get_transfer,
-    get_user_budget as load_user_budget, get_user_templates, get_user_transfers,
-    increment_suspicious_count, is_budget_frozen, next_transfer_id, record_spend_timestamp,
-    record_transfer, save_budget_config_version, save_template, set_budget_freeze, set_user_budget,
+    clear_budget_freeze, clear_budget_suspension, delete_template, get_budget_config_history,
+    get_budget_config_version, get_budget_freeze, get_budget_suspension, get_category_available,
+    get_template, get_transfer, get_user_budget as load_user_budget, get_user_templates,
+    get_user_transfers, increment_suspicious_count, is_budget_frozen, next_transfer_id,
+    record_spend_timestamp, record_transfer, save_budget_config_version, save_template,
+    set_budget_freeze, set_budget_suspension, set_user_budget, try_auto_resume_budget,
 };
 
 /// Deletion cooldown period in seconds (24 hours).
@@ -391,6 +392,12 @@ impl BudgetContract {
     }
 
     fn assert_active_and_not_expired(env: &Env, user: &Address) {
+        let now = env.ledger().timestamp();
+        try_auto_resume_budget(env, user, now);
+        if storage::is_budget_suspended(env, user, now) {
+            panic_with_error!(env, BudgetError::BudgetInactive);
+        }
+
         if let Some(mut record) = env
             .storage()
             .persistent()
@@ -400,7 +407,7 @@ impl BudgetContract {
                 panic_with_error!(env, BudgetError::BudgetInactive);
             }
             if let Some(expires_at) = record.expires_at {
-                if env.ledger().timestamp() >= expires_at {
+                if now >= expires_at {
                     record.is_active = false;
                     env.storage()
                         .persistent()
@@ -441,6 +448,65 @@ impl BudgetContract {
         env.storage()
             .persistent()
             .set(&DataKey::Budget(user.clone()), &record);
+    }
+
+    /// Suspends a user's budget. When `duration_seconds` is zero the suspension is indefinite
+    /// until `resume_budget` is called; otherwise the budget automatically resumes afterward.
+    pub fn suspend_budget(env: Env, admin: Address, user: Address, duration_seconds: u64) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let mut record = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, BudgetError::UserNotFound));
+
+        let now = env.ledger().timestamp();
+        let resume_at = if duration_seconds > 0 {
+            now.saturating_add(duration_seconds)
+        } else {
+            0
+        };
+
+        set_budget_suspension(
+            &env,
+            &user,
+            &BudgetSuspension {
+                is_suspended: true,
+                suspended_at: now,
+                resume_at,
+            },
+        );
+
+        record.is_active = false;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Budget(user.clone()), &record);
+    }
+
+    /// Manually resumes a suspended budget before its optional expiration.
+    pub fn resume_budget(env: Env, admin: Address, user: Address) {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        clear_budget_suspension(&env, &user);
+
+        if let Some(mut record) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BudgetRecord>(&DataKey::Budget(user.clone()))
+        {
+            record.is_active = true;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Budget(user.clone()), &record);
+        }
+    }
+
+    /// Returns whether the user's budget is currently suspended.
+    pub fn is_budget_suspended(env: Env, user: Address) -> bool {
+        storage::is_budget_suspended(&env, &user, env.ledger().timestamp())
     }
 
     pub fn deactivate_if_expired(env: Env, user: Address) {
@@ -1551,6 +1617,62 @@ mod test {
         let manager = Address::generate(&env);
 
         client.delegate_manager(&owner, &manager, &0_i128);
+    }
+
+    #[test]
+    fn test_suspended_budget_blocks_operations_until_expiration() {
+        use soroban_sdk::testutils::Ledger as _;
+
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        let food = symbol_short!("food");
+
+        client.update_budget(&admin, &user, &1_000_i128, &None);
+        client.set_category_budget(&admin, &user, &food, &500_i128);
+
+        client.suspend_budget(&admin, &user, &3600);
+        assert!(client.is_budget_suspended(&user));
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += 1800;
+        });
+        assert!(client.is_budget_suspended(&user));
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += 3601;
+        });
+        assert!(!client.is_budget_suspended(&user));
+
+        let record = client.get_budget(&user).unwrap();
+        assert!(record.is_active);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #19)")]
+    fn test_suspended_budget_blocks_category_spend() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        let food = symbol_short!("food");
+
+        client.update_budget(&admin, &user, &1_000_i128, &None);
+        client.set_category_budget(&admin, &user, &food, &500_i128);
+        client.suspend_budget(&admin, &user, &0);
+
+        client.spend_from_category(&user, &food, &10_i128);
+    }
+
+    #[test]
+    fn test_manual_resume_budget() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+
+        client.update_budget(&admin, &user, &500_i128, &None);
+        client.suspend_budget(&admin, &user, &0);
+        assert!(client.is_budget_suspended(&user));
+
+        client.resume_budget(&admin, &user);
+        assert!(!client.is_budget_suspended(&user));
+        assert!(client.get_budget(&user).unwrap().is_active);
     }
 }
 

@@ -75,6 +75,18 @@ path = "tests/rate_limit_tests.rs"
 name = "concurrent_spending_tests"
 path = "contracts/tests/concurrent_spending_tests.rs"
 
+[[test]]
+name = "governance_tests"
+path = "tests/governance_tests.rs"
+
+[[test]]
+name = "throttling_test"
+path = "contracts/tests/throttling_test.rs"
+
+[[test]]
+name = "timelock_tests"
+path = "tests/timelock_tests.rs"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
