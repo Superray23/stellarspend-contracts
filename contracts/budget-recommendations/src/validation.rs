@@ -221,7 +221,10 @@ mod tests {
     fn test_validate_batch_empty_fails() {
         let env = Env::default();
         let profiles: Vec<UserProfile> = Vec::new(&env);
-        assert_eq!(validate_batch(&env, &profiles), Err("Batch cannot be empty"));
+        assert_eq!(
+            validate_batch(&env, &profiles),
+            Err("Batch cannot be empty")
+        );
     }
 
     #[test]
