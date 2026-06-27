@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Vec};
+use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 #[derive(Clone)]
 #[contracttype]
@@ -20,9 +20,11 @@ pub struct FeeLog {
 }
 
 #[derive(Clone)]
+#[contracttype]
 pub enum DataKey {
     FeeLogCount,
     FeeLog(u64),
+    UserFeeOverride(Address),
     UserProfile(Address),
 }
 
@@ -90,8 +92,6 @@ pub fn get_fee_logs(env: &Env, start: u64, end: u64) -> Vec<FeeLog> {
     logs
 }
 
-#[derive(Clone)]
-#[contracttype]
 pub fn set_user_fee_override(env: &Env, user: Address, fee_bps: u32) {
     // safety guard
     assert!(fee_bps <= 10_000, "invalid fee");
@@ -123,5 +123,5 @@ pub fn get_user_profile(env: &Env, user: Address) -> String {
     env.storage()
         .persistent()
         .get(&DataKey::UserProfile(user))
-        .unwrap_or("".to_string())
+        .unwrap_or_else(|| String::from_str(env, ""))
 }

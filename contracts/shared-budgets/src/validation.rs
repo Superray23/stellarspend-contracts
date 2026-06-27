@@ -1,7 +1,5 @@
 // Validation helpers for shared budget operations.
 
-use soroban_sdk::{Address, Env};
-
 /// Validates an amount.
 pub fn validate_amount(amount: i128) -> Result<(), &'static str> {
     if amount <= 0 {

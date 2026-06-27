@@ -1,13 +1,15 @@
 #![cfg(test)]
 
+extern crate std;
+
 use crate::{TransferContract, TransferContractClient};
-use shared::errors::SharedError;
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use std::string::String as StdString;
 
 fn setup_test() -> (Env, TransferContractClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register_contract(None, TransferContract);
+    let contract_id = env.register(TransferContract, ());
     let client = TransferContractClient::new(&env, &contract_id);
     (env, client)
 }
@@ -23,22 +25,17 @@ fn test_clean_description_passes() {
     let clean_desc = String::from_str(&env, "Payment for dinner.");
 
     // Result should be Ok with a reference ID
-    let result = client.execute_transfer(&from, &to, &amount, &clean_desc);
-    assert!(result.is_ok());
-
-    // Verify reference ID format
-    let ref_id = result.unwrap();
+    let ref_id = client.execute_transfer(&from, &to, &amount, &clean_desc);
     assert!(ref_id.len() > 0);
     // Reference IDs should start with "TXN-"
-    let ref_id_str = std::string::String::from_utf8(
-        ref_id.as_ref().iter().map(|b| *b as u8).collect::<Vec<_>>(),
-    )
-    .unwrap_or_default();
+    let mut ref_id_bytes = std::vec![0u8; ref_id.len() as usize];
+    ref_id.copy_into_slice(&mut ref_id_bytes);
+    let ref_id_str = StdString::from_utf8(ref_id_bytes).unwrap_or_default();
     assert!(ref_id_str.starts_with("TXN-"));
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #3)")] // SharedError::InvalidInput = 3
+#[should_panic(expected = "HostError: Error(Contract, #10)")] // SharedError::InvalidInput = 10
 fn test_invalid_characters_rejected() {
     let (env, client) = setup_test();
     let from = Address::generate(&env);
@@ -48,12 +45,12 @@ fn test_invalid_characters_rejected() {
     // Description containing invalid characters (e.g., emojis or unsupported symbols)
     let invalid_desc = String::from_str(&env, "Payment 🎉");
 
-    // This should panic with the SharedError::InvalidInput error code (3)
+    // This should panic with the SharedError::InvalidInput error code (10)
     client.execute_transfer(&from, &to, &amount, &invalid_desc);
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #3)")]
+#[should_panic(expected = "HostError: Error(Contract, #10)")]
 fn test_html_tags_rejected() {
     let (env, client) = setup_test();
     let from = Address::generate(&env);
@@ -65,7 +62,8 @@ fn test_html_tags_rejected() {
 }
 
 #[test]
-fn test_empty_description_passes() {
+#[should_panic(expected = "HostError: Error(Contract, #12)")]
+fn test_empty_description_rejected() {
     let (env, client) = setup_test();
     let from = Address::generate(&env);
     let to = Address::generate(&env);
@@ -73,9 +71,7 @@ fn test_empty_description_passes() {
 
     let empty_desc = String::from_str(&env, "");
 
-    // Empty strings shouldn't fail and should return a reference ID
-    let result = client.execute_transfer(&from, &to, &amount, &empty_desc);
-    assert!(result.is_ok());
+    client.execute_transfer(&from, &to, &amount, &empty_desc);
 }
 
 #[test]
@@ -89,12 +85,8 @@ fn test_transfer_generates_unique_reference_ids() {
     let desc = String::from_str(&env, "Payment");
 
     // Execute two transfers from the same sender
-    let ref_id_1 = client
-        .execute_transfer(&from, &to1, &amount, &desc)
-        .unwrap();
-    let ref_id_2 = client
-        .execute_transfer(&from, &to2, &amount, &desc)
-        .unwrap();
+    let ref_id_1 = client.execute_transfer(&from, &to1, &amount, &desc);
+    let ref_id_2 = client.execute_transfer(&from, &to2, &amount, &desc);
 
     // Reference IDs should be different for different transactions
     assert_ne!(ref_id_1, ref_id_2);

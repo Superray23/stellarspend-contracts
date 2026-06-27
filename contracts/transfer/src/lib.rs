@@ -24,7 +24,7 @@ impl TransferContract {
 
         // 1. Sanitize the transfer description
         // Rejects invalid characters to prevent malformed text storage.
-        sanitize_description(&env, &description)?;
+        sanitize_description(&description)?;
 
         // 2. Generate a unique transaction reference ID
         let ref_id_counter_key = Symbol::new(&env, "transfer_ref_counter");

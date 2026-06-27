@@ -1,5 +1,8 @@
 //! Validation logic for spending category names.
 
+extern crate alloc;
+
+use alloc::string::ToString;
 use soroban_sdk::Symbol;
 
 /// Validates that a category name is not empty and has reasonable length.
@@ -12,7 +15,7 @@ pub fn validate_category_name(name: &Symbol) -> Result<(), ()> {
     // but we verify the name is non-empty and within bounds.
     // A Symbol's length is the number of characters.
     // We check that it's not an empty symbol and within a reasonable max length.
-    let len = name.len();
+    let len = name.to_string().len();
     if len == 0 || len > 32 {
         return Err(());
     }

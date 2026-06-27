@@ -83,7 +83,7 @@ pub enum AnalyticsError {
     /// Invalid transaction amount
     InvalidAmount = 7,
     /// Invalid audit log data
-    InvalidAuditLog = 7,
+    InvalidAuditLog = 15,
     /// Bundle is empty
     EmptyBundle = 8,
     /// Bundle exceeds maximum size
@@ -263,7 +263,7 @@ impl TransactionAnalyticsContract {
             panic_with_error!(&env, AnalyticsError::EmptyBatch);
         }
 
-        if logs.len() > MAX_BATCH_SIZE as usize {
+        if logs.len() > MAX_BATCH_SIZE {
             panic_with_error!(&env, AnalyticsError::BatchTooLarge);
         }
 
@@ -882,7 +882,7 @@ impl TransactionAnalyticsContract {
     /// * `transactions` - Vector of transactions to analyze
     /// * `year` - The year to analyze
     /// * `month` - The month to analyze
-    pub fn update_monthly_spending_analytics(
+    pub fn update_monthly_analytics(
         env: Env,
         caller: Address,
         user: Address,
@@ -1111,7 +1111,7 @@ impl TransactionAnalyticsContract {
         });
 
         // FIX: pass &amounts directly — no invalid iterator conversion
-        calculate_batch_fees(&env, &amounts, &config)
+        crate::fees::calculate_batch_fees(&env, &amounts, &config)
     }
 
     /// Pauses fee collection (admin only).

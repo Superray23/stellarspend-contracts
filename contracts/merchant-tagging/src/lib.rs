@@ -18,9 +18,12 @@
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod events;
 pub mod types;
 
+use alloc::string::ToString;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Symbol, Vec};
 
 use crate::events::{

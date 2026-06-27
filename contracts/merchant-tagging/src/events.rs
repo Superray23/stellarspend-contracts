@@ -5,7 +5,7 @@ use soroban_sdk::{symbol_short, Address, Env, Symbol};
 /// Emitted when a new merchant is registered.
 pub fn emit_merchant_registered(env: &Env, merchant_id: &Symbol, registrar: &Address) {
     env.events().publish(
-        (symbol_short!("merchant"), symbol_short!("registered")),
+        (symbol_short!("merchant"), symbol_short!("regd")),
         (merchant_id.clone(), registrar.clone()),
     );
 }
@@ -21,7 +21,7 @@ pub fn emit_merchant_updated(env: &Env, merchant_id: &Symbol, updater: &Address)
 /// Emitted when a merchant is deactivated.
 pub fn emit_merchant_deactivated(env: &Env, merchant_id: &Symbol, caller: &Address) {
     env.events().publish(
-        (symbol_short!("merchant"), symbol_short!("deactivated")),
+        (symbol_short!("merchant"), symbol_short!("deact")),
         (merchant_id.clone(), caller.clone()),
     );
 }
@@ -43,7 +43,7 @@ pub fn emit_transaction_tagged(
 /// Emitted when a transaction tag is removed.
 pub fn emit_tag_removed(env: &Env, tx_id: u64, merchant_id: &Symbol) {
     env.events().publish(
-        (symbol_short!("merchant"), symbol_short!("tag_removed")),
+        (symbol_short!("merchant"), symbol_short!("tag_rm")),
         (tx_id, merchant_id.clone()),
     );
 }

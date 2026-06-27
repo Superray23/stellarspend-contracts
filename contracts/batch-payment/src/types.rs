@@ -17,9 +17,28 @@ pub struct ReceiptEvent {
     pub total_amount: i128,
 }
 
-use crate::storage::{bump_instance, DataKey};
-use crate::types::Error;
-use soroban_sdk::{panic_with_error, Address, Env};
+use soroban_sdk::{panic_with_error, Env};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum Error {
+    NotInitialized = 1,
+    Unauthorized = 2,
+}
+
+impl From<Error> for soroban_sdk::Error {
+    fn from(err: Error) -> Self {
+        soroban_sdk::Error::from_contract_error(err as u32)
+    }
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    Admin,
+}
+
+fn bump_instance(_env: &Env) {}
 
 /// Persist the admin address.
 ///
@@ -69,4 +88,12 @@ pub fn require_admin(env: &Env, caller: &Address) {
         panic_with_error!(env, Error::Unauthorized);
     }
     caller.require_auth();
+}
+
+pub struct ContractUtils;
+
+impl ContractUtils {
+    pub fn get_admin(env: &Env) -> Address {
+        get_admin(env)
+    }
 }

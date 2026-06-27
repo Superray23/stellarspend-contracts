@@ -9,7 +9,3 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-
-[[bin]]
-name = "batch-token-mint"
-path = "src/lib.rs"

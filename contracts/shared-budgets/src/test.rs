@@ -3,8 +3,7 @@
 #![cfg(test)]
 
 use crate::{
-    Budget, BudgetContribution, BudgetSpendingRule, SharedBudgetContract,
-    SharedBudgetContractClient, SharedBudgetError,
+    BudgetSpendingRule, BudgetUtilizationBand, SharedBudgetContract, SharedBudgetContractClient,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
@@ -39,6 +38,10 @@ fn setup_test_env() -> (
     client.initialize(&admin);
 
     (env, admin, token_id, token_client, client)
+}
+
+fn mint_balance(env: &Env, token: &Address, recipient: &Address, amount: i128) {
+    token::StellarAssetClient::new(env, token).mint(recipient, &amount);
 }
 
 // Initialization Tests
@@ -103,7 +106,7 @@ fn test_create_budget() {
 
 #[test]
 fn test_contribute_to_budget() {
-    let (env, admin, token, _token_client, client) = setup_test_env();
+    let (env, _admin, token, _token_client, client) = setup_test_env();
 
     let creator = Address::generate(&env);
     let contributor = Address::generate(&env);
@@ -123,6 +126,7 @@ fn test_contribute_to_budget() {
 
     // Contribute to the budget
     let contribution_amount = 100_000_000; // 10 XLM
+    mint_balance(&env, &token, &contributor, contribution_amount);
     client.contribute_to_budget(&contributor, &budget_id, &contribution_amount, &None);
 
     // Check that budget balance increased
@@ -151,6 +155,7 @@ fn test_contribution_with_memo() {
 
     let amount = 100_000_000;
     let memo = Some(Symbol::new(&env, "lunch_contribution"));
+    mint_balance(&env, &token, &contributor, amount);
     client.contribute_to_budget(&contributor, &budget_id, &amount, &memo);
 
     let contribution_id = client.get_total_contribs_processed();
@@ -163,7 +168,7 @@ fn test_contribution_with_memo() {
 
 #[test]
 fn test_spend_from_budget() {
-    let (env, admin, token, _token_client, client) = setup_test_env();
+    let (env, _admin, token, _token_client, client) = setup_test_env();
 
     let creator = Address::generate(&env);
     let member1 = Address::generate(&env);
@@ -179,6 +184,7 @@ fn test_spend_from_budget() {
 
     // Contribute to budget first
     let contribution_amount = 100_000_000; // 10 XLM
+    mint_balance(&env, &token, &member1, contribution_amount);
     client.contribute_to_budget(&member1, &budget_id, &contribution_amount, &None);
 
     // Spend from budget
@@ -292,11 +298,90 @@ fn test_budget_stats_accumulate() {
     assert_eq!(client.get_total_budgets_created(), 2);
 }
 
+#[test]
+fn test_budget_utilization_band_queries() {
+    let (env, _admin, token, _token_client, client) = setup_test_env();
+
+    let creator = Address::generate(&env);
+    let member = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let mut members: Vec<Address> = Vec::new(&env);
+    members.push_back(member.clone());
+
+    let budget_id = client.create_budget(
+        &creator,
+        &Symbol::new(&env, "util_budget"),
+        &members,
+        &token,
+        &Vec::new(&env),
+    );
+
+    mint_balance(&env, &token, &member, 100_000_000_i128);
+    client.contribute_to_budget(&member, &budget_id, &100_000_000_i128, &None);
+    assert_eq!(
+        client.get_budget_utilization_band(&budget_id),
+        BudgetUtilizationBand::Low
+    );
+
+    client.spend_from_budget(&member, &budget_id, &recipient, &30_000_000_i128);
+    assert_eq!(
+        client.get_budget_utilization_band(&budget_id),
+        BudgetUtilizationBand::Moderate
+    );
+
+    client.spend_from_budget(&member, &budget_id, &recipient, &30_000_000_i128);
+    assert_eq!(
+        client.get_budget_utilization_band(&budget_id),
+        BudgetUtilizationBand::High
+    );
+
+    client.spend_from_budget(&member, &budget_id, &recipient, &25_000_000_i128);
+    let summary = client.get_budget_utilization_summary(&budget_id);
+
+    assert_eq!(summary.utilization_percent, 85);
+    assert_eq!(summary.total_spent, 85_000_000);
+    assert_eq!(summary.remaining_balance, 15_000_000);
+    assert_eq!(summary.utilization_band, BudgetUtilizationBand::Critical);
+}
+
+#[test]
+fn test_archive_inactive_budget_after_retention() {
+    let (env, _admin, token, _token_client, client) = setup_test_env();
+
+    let admin = client.get_admin();
+    client.set_archive_retention_period(&admin, &3_600);
+
+    let creator = Address::generate(&env);
+    let budget_id = client.create_budget(
+        &creator,
+        &Symbol::new(&env, "archivable"),
+        &Vec::new(&env),
+        &token,
+        &Vec::new(&env),
+    );
+
+    client.deactivate_budget(&creator, &budget_id);
+    env.ledger().with_mut(|li| {
+        li.timestamp = 3_601;
+    });
+
+    assert_eq!(client.archive_inactive_budgets(&admin, &10), 1);
+    assert!(client.try_get_budget(&budget_id).is_err());
+
+    let archived = client.get_archived_budget(&budget_id).unwrap();
+    assert_eq!(archived.budget.id, budget_id);
+    assert_eq!(archived.budget.is_active, false);
+    assert_eq!(archived.deactivated_at, 0);
+    assert_eq!(archived.archived_at, 3_601);
+    assert_eq!(client.get_contributions(&budget_id).len(), 0);
+}
+
 // Error Tests
 
 #[test]
 fn test_spend_without_sufficient_funds() {
-    let (env, admin, token, _token_client, client) = setup_test_env();
+    let (env, _admin, token, _token_client, client) = setup_test_env();
 
     let creator = Address::generate(&env);
     let member1 = Address::generate(&env);
@@ -312,12 +397,13 @@ fn test_spend_without_sufficient_funds() {
 
     // Try to spend without contributing anything
     let expense_amount = 50_000_000; // 5 XLM
-    client.spend_from_budget(&member1, &budget_id, &recipient, &expense_amount);
+    let result = client.try_spend_from_budget(&member1, &budget_id, &recipient, &expense_amount);
+    assert!(result.is_err());
 }
 
 #[test]
 fn test_non_member_cannot_spend() {
-    let (env, admin, token, _token_client, client) = setup_test_env();
+    let (env, _admin, token, _token_client, client) = setup_test_env();
 
     let creator = Address::generate(&env);
     let member1 = Address::generate(&env);
@@ -334,11 +420,13 @@ fn test_non_member_cannot_spend() {
 
     // Contribute to budget first
     let contribution_amount = 100_000_000; // 10 XLM
+    mint_balance(&env, &token, &member1, contribution_amount);
     client.contribute_to_budget(&member1, &budget_id, &contribution_amount, &None);
 
     // Non-member tries to spend (should fail)
     let expense_amount = 50_000_000; // 5 XLM
-    client.spend_from_budget(&non_member, &budget_id, &recipient, &expense_amount);
+    let result = client.try_spend_from_budget(&non_member, &budget_id, &recipient, &expense_amount);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -456,6 +544,7 @@ fn test_get_contributions_multiple() {
         &Vec::new(&env),
     );
 
+    mint_balance(&env, &token, &member, 300_000_000_i128);
     client.contribute_to_budget(&member, &budget_id, &100_000_000_i128, &None);
     client.contribute_to_budget(
         &member,
@@ -497,6 +586,7 @@ fn test_get_contributions_isolated_per_budget() {
         &Vec::new(&env),
     );
 
+    mint_balance(&env, &token, &contributor, 50_000_000_i128);
     client.contribute_to_budget(&contributor, &budget_a, &50_000_000_i128, &None);
 
     assert_eq!(client.get_contributions(&budget_a).len(), 1);
@@ -536,6 +626,7 @@ fn test_get_contributions_paginated_multiple_pages() {
         &Vec::new(&env),
     );
 
+    mint_balance(&env, &token, &member, 600_000_000_i128);
     client.contribute_to_budget(&member, &budget_id, &100_000_000_i128, &None);
     client.contribute_to_budget(
         &member,
@@ -574,6 +665,7 @@ fn test_get_contributions_paginated_deterministic_order() {
         &Vec::new(&env),
     );
 
+    mint_balance(&env, &token, &member, 60_000_000_i128);
     client.contribute_to_budget(&member, &budget_id, &10_000_000_i128, &None);
     client.contribute_to_budget(&member, &budget_id, &20_000_000_i128, &None);
     client.contribute_to_budget(&member, &budget_id, &30_000_000_i128, &None);

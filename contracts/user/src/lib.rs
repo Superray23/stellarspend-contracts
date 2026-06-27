@@ -48,4 +48,4 @@ impl UsersContract {
         users.contains_key(user)
     }
 }
-
+

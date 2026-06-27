@@ -22,6 +22,6 @@ impl BatchHistoryContract {
         // Requirement: Validate user/requester
         requester.require_auth();
 
-        logic::get_batch_history(env, users)
+        logic::get_batch_history(&env, users)
     }
 }

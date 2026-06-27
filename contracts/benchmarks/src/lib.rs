@@ -3,12 +3,14 @@
 
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger, LedgerInfo},
-    vec, Address, Env, Symbol, Vec,
+    vec, Address, Bytes, Env, Symbol,
 };
 
 // Use underscores for crate names with dashes
 use budget::{BudgetContract, BudgetContractClient};
-use savings_goals::{SavingsGoalRequest, SavingsGoalsContract, SavingsGoalsContractClient};
+use savings_goals::{
+    GoalResult, SavingsGoalRequest, SavingsGoalsContract, SavingsGoalsContractClient,
+};
 
 // ─── Benchmark Helpers ────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ fn make_env() -> Env {
 fn set_ledger_info(env: &Env, ts: u64) {
     env.ledger().set(LedgerInfo {
         timestamp: ts,
-        protocol_version: 20,
+        protocol_version: 22,
         sequence_number: 1,
         network_id: Default::default(),
         base_reserve: 10,
@@ -50,6 +52,19 @@ fn print_metrics(name: &str, cpu: u64, mem: u64) {
     );
 }
 
+fn idempotency_token(env: &Env, seed: u8) -> Bytes {
+    let mut token = Bytes::new(env);
+    token.push_back(seed);
+    token
+}
+
+fn first_goal_id(result: GoalResult) -> u64 {
+    match result {
+        GoalResult::Success(goal) => goal.goal_id,
+        GoalResult::Failure(_, code) => panic!("goal creation failed in benchmark: {}", code),
+    }
+}
+
 // ─── Budget Benchmarks ────────────────────────────────────────────────────────
 
 #[test]
@@ -58,7 +73,7 @@ fn benchmark_budget_creation() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    let cid = env.register(&BudgetContract, ());
+    let cid = env.register(BudgetContract, ());
     let client = BudgetContractClient::new(&env, &cid);
 
     client.initialize(&admin);
@@ -88,7 +103,7 @@ fn benchmark_spending_validation() {
     let user = Address::generate(&env);
     let category = Symbol::new(&env, "food");
 
-    let cid = env.register(&BudgetContract, ());
+    let cid = env.register(BudgetContract, ());
     let client = BudgetContractClient::new(&env, &cid);
 
     client.initialize(&admin);
@@ -125,7 +140,7 @@ fn benchmark_goal_creation() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    let cid = env.register(&SavingsGoalsContract, ());
+    let cid = env.register(SavingsGoalsContract, ());
     let client = SavingsGoalsContractClient::new(&env, &cid);
 
     client.initialize(&admin);
@@ -133,11 +148,13 @@ fn benchmark_goal_creation() {
     let request = SavingsGoalRequest {
         user: user.clone(),
         goal_name: Symbol::new(&env, "NewCar"),
-        target_amount: 50000,
-        initial_contribution: 1000,
-        deadline: 1_800_000_000,
+        target_amount: 50_000_000,
+        deadline: 10_000,
+        initial_contribution: 10_000_000,
+        priority: 0,
         lock_duration_seconds: 0,
         penalty_bps: 0,
+        expiration_seconds: 0,
     };
 
     let requests = vec![&env, request];
@@ -170,7 +187,7 @@ fn benchmark_goal_contribution() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    let cid = env.register(&SavingsGoalsContract, ());
+    let cid = env.register(SavingsGoalsContract, ());
     let client = SavingsGoalsContractClient::new(&env, &cid);
 
     client.initialize(&admin);
@@ -178,20 +195,22 @@ fn benchmark_goal_contribution() {
     let request = SavingsGoalRequest {
         user: user.clone(),
         goal_name: Symbol::new(&env, "House"),
-        target_amount: 100000,
+        target_amount: 100_000_000,
+        deadline: 10_000,
         initial_contribution: 0,
-        deadline: 1_800_000_000,
+        priority: 0,
         lock_duration_seconds: 0,
         penalty_bps: 0,
+        expiration_seconds: 0,
     };
-    client.batch_set_savings_goals(&admin, &vec![&env, request]);
-    let goal_id = 1u64;
+    let result = client.batch_set_savings_goals(&admin, &vec![&env, request]);
+    let goal_id = first_goal_id(result.results.get(0).unwrap());
 
     env.cost_estimate().budget().reset_default();
     let cpu_before = cpu_instructions(&env);
     let mem_before = mem_bytes(&env);
 
-    client.contribute_to_goal(&user, &goal_id, &5000i128);
+    client.contribute_to_goal(&user, &goal_id, &5_000_000i128, &idempotency_token(&env, 1));
 
     let cpu_used = cpu_instructions(&env) - cpu_before;
     let mem_used = mem_bytes(&env) - mem_before;
@@ -211,7 +230,7 @@ fn benchmark_goal_withdrawal() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    let cid = env.register(&SavingsGoalsContract, ());
+    let cid = env.register(SavingsGoalsContract, ());
     let client = SavingsGoalsContractClient::new(&env, &cid);
 
     client.initialize(&admin);
@@ -219,20 +238,22 @@ fn benchmark_goal_withdrawal() {
     let request = SavingsGoalRequest {
         user: user.clone(),
         goal_name: Symbol::new(&env, "Vacation"),
-        target_amount: 2000,
-        initial_contribution: 2000, // Fully funded
-        deadline: 1_800_000_000,
+        target_amount: 20_000_000,
+        deadline: 10_000,
+        initial_contribution: 20_000_000, // Fully funded
+        priority: 0,
         lock_duration_seconds: 0,
         penalty_bps: 0,
+        expiration_seconds: 0,
     };
-    client.batch_set_savings_goals(&admin, &vec![&env, request]);
-    let goal_id = 1u64;
+    let result = client.batch_set_savings_goals(&admin, &vec![&env, request]);
+    let goal_id = first_goal_id(result.results.get(0).unwrap());
 
     env.cost_estimate().budget().reset_default();
     let cpu_before = cpu_instructions(&env);
     let mem_before = mem_bytes(&env);
 
-    client.withdraw_from_goal(&user, &goal_id, &500i128);
+    client.withdraw_from_goal(&user, &goal_id, &5_000_000i128);
 
     let cpu_used = cpu_instructions(&env) - cpu_before;
     let mem_used = mem_bytes(&env) - mem_before;
@@ -254,7 +275,7 @@ fn benchmark_event_emission_overhead() {
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
 
-    let cid = env.register(&BudgetContract, ());
+    let cid = env.register(BudgetContract, ());
     let client = BudgetContractClient::new(&env, &cid);
     client.initialize(&admin);
 

@@ -1,5 +1,7 @@
 #![no_std]
 
+extern crate alloc;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
     Env, Map, String, Symbol, Vec,
@@ -333,7 +335,7 @@ impl TransactionsContract {
             panic_with_error!(&env, TransactionError::TransactionNotFound);
         }
 
-        let success = storage::update_transaction_status(&env, id.clone(), caller, status);
+        let success = storage::update_transaction_status(&env, id.clone(), caller, status.clone());
 
         if success {
             env.events().publish(

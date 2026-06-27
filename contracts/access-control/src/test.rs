@@ -1,11 +1,13 @@
 #![cfg(test)]
 
+extern crate std;
+
 use super::*;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 fn create_contract() -> (Env, Address, Address) {
     let env = Env::default();
-    let contract_id = env.register_contract(None, AccessControlContract);
+    let contract_id = env.register(AccessControlContract, ());
     let client = AccessControlContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);

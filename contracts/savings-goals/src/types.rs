@@ -1,6 +1,6 @@
 //! Data types and events for batch savings goal operations.
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol, Vec};
 
 /// Maximum number of user-goal pairs in a single batch for optimization.
 pub const MAX_BATCH_SIZE: u32 = 100;
@@ -228,6 +228,8 @@ pub struct ContributionRecord {
     pub amount: i128,
     /// Ledger timestamp when the contribution was made.
     pub contributed_at: u64,
+    /// Client-supplied idempotency token used to dedupe retries.
+    pub idempotency_token: Bytes,
     /// Whether this contribution has already been reversed.
     pub reversed: bool,
 }
@@ -272,6 +274,14 @@ pub enum DataKey {
     Contribution(u64, u64),
     /// Last contribution index per goal
     LastContribId(u64),
+    /// Idempotency token keyed by (goal owner, goal_id, token) -> contribution_id
+    ContributionIdempotency(Address, u64, Bytes),
+    /// Default alert thresholds applied to goals that do not override them.
+    DefaultDeadlineAlertThresholds,
+    /// Per-goal override for deadline alert thresholds.
+    GoalDeadlineAlertThresholds(u64),
+    /// Tracks which alert thresholds have already fired for a goal.
+    GoalDeadlineAlertSent(u64, u64),
 }
 
 /// Error codes for goal validation and creation.
@@ -310,6 +320,10 @@ pub mod ErrorCode {
     pub const INSUFFICIENT_BALANCE: u32 = 13;
     /// Invalid withdrawal or contribution amount
     pub const INVALID_WITHDRAW_AMOUNT: u32 = 14;
+    /// Deadline alert threshold configuration is invalid
+    pub const INVALID_ALERT_THRESHOLD: u32 = 15;
+    /// Contribution retry re-used an existing idempotency token
+    pub const DUPLICATE_CONTRIBUTION_REQUEST: u32 = 16;
 }
 
 /// Events emitted by the savings goals contract.
@@ -481,5 +495,33 @@ impl GoalEvents {
     pub fn goal_snapshot_recorded(env: &Env, goal_id: u64, amount: i128, timestamp: u64) {
         let topics = (symbol_short!("goal"), symbol_short!("snapshot"), goal_id);
         env.events().publish(topics, (goal_id, amount, timestamp));
+    }
+
+    /// Event emitted when deadline alert thresholds are configured for a goal.
+    pub fn deadline_alert_thresholds_updated(
+        env: &Env,
+        goal_id: u64,
+        user: &Address,
+        threshold_count: u32,
+    ) {
+        let topics = (symbol_short!("goal"), symbol_short!("al_cfg"), goal_id);
+        env.events()
+            .publish(topics, (user.clone(), threshold_count));
+    }
+
+    /// Event emitted when a goal is approaching its deadline while still underfunded.
+    pub fn deadline_alert(
+        env: &Env,
+        goal_id: u64,
+        user: &Address,
+        threshold: u64,
+        remaining_ledgers: u64,
+        remaining_amount: i128,
+    ) {
+        let topics = (symbol_short!("goal"), symbol_short!("dl_alert"), goal_id);
+        env.events().publish(
+            topics,
+            (user.clone(), threshold, remaining_ledgers, remaining_amount),
+        );
     }
 }

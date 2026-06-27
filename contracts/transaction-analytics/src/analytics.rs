@@ -566,7 +566,7 @@ fn update_category_spending(
             if i != index {
                 new_vec.push_back(category_spending.get(i).unwrap());
             } else {
-                new_vec.push_back((category, new_amount));
+                new_vec.push_back((category.clone(), new_amount));
             }
         }
         *category_spending = new_vec;
@@ -579,7 +579,7 @@ fn update_category_spending(
 /// Updates or creates monthly analytics in storage
 pub fn update_monthly_analytics_storage(env: &Env, analytics: &MonthlySpendingAnalytics) {
     let key = DataKey::MonthlyAnalytics(analytics.year, analytics.month, analytics.user.clone());
-    env.storage().persistent().set(&key, &analytics);
+    env.storage().persistent().set(&key, analytics);
 
     // Update total tracked users if this is a new user
     let mut total_users: u64 = env

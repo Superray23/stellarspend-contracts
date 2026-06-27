@@ -3,6 +3,7 @@
 mod test;
 mod types;
 
+pub use crate::types::{ContractUtils, DataKey};
 use crate::types::{Payment, ReceiptEvent};
 use shared::utils::generate_transaction_reference_id;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, String, Symbol, Vec};

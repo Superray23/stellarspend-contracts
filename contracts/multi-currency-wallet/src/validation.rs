@@ -1,6 +1,6 @@
 //! Validation logic for balance update requests.
 
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
 use crate::types::{BalanceUpdateRequest, DataKey, ErrorCode, MAX_BALANCE, MIN_BALANCE};
 
@@ -65,10 +65,9 @@ pub fn is_valid_amount(amount: i128) -> bool {
 /// # Returns
 /// * `true` if operation is "set", "add", or "subtract"
 pub fn is_valid_operation(operation: &Symbol) -> bool {
-    // In Soroban, we can't directly convert Symbol to string in no_std
-    // We'll accept any symbol here and handle invalid operations during execution
-    // Valid operations: "set", "add", "subtract"
-    true
+    *operation == symbol_short!("set")
+        || *operation == symbol_short!("add")
+        || *operation == symbol_short!("subtract")
 }
 
 /// Validates balance after operation to prevent negative balances.
@@ -115,19 +114,18 @@ pub fn validate_and_compute_balance(
 
 /// Computes new balance based on operation.
 fn compute_new_balance(current: i128, operation: &Symbol, amount: i128) -> Result<i128, u32> {
-    // Note: In production, use proper symbol comparison
-    // For now, we'll use symbol_short! macro patterns
-    let op_str = operation.to_string();
-
-    match op_str.as_str() {
-        "set" => Ok(amount),
-        "add" => current
+    if *operation == symbol_short!("set") {
+        Ok(amount)
+    } else if *operation == symbol_short!("add") {
+        current
             .checked_add(amount)
-            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW),
-        "subtract" => current
+            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+    } else if *operation == symbol_short!("subtract") {
+        current
             .checked_sub(amount)
-            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW),
-        _ => Err(ErrorCode::INVALID_OPERATION),
+            .ok_or(ErrorCode::ARITHMETIC_OVERFLOW)
+    } else {
+        Err(ErrorCode::INVALID_OPERATION)
     }
 }
 

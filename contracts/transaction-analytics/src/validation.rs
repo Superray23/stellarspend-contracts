@@ -3,7 +3,7 @@
 //! Implements strict validation for all public inputs in the transaction analytics contract.
 //! Provides standardized validation functions for addresses, amounts, assets, and other inputs.
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
+use soroban_sdk::{Address, Env, Vec};
 
 use crate::types::{
     BundledTransaction, RatingInput, RefundRequest, Transaction, TransactionStatusUpdate,
@@ -13,18 +13,12 @@ use crate::types::{
 /// Validates an address input ensuring it's not empty/null.
 ///
 /// # Arguments
-/// * `env` - The contract environment
 /// * `address` - The address to validate
 ///
 /// # Returns
 /// * `Ok(())` if valid, `Err(ValidationError)` if invalid
-pub fn validate_address(env: &Env, address: &Address) -> Result<(), ValidationError> {
+pub fn validate_address(_address: &Address) -> Result<(), ValidationError> {
     // Soroban SDK addresses are guaranteed to be valid by construction
-    // However, we can perform additional checks if needed
-    if address.is_none() {
-        return Err(ValidationError::InvalidAddress);
-    }
-
     Ok(())
 }
 
@@ -64,11 +58,6 @@ pub fn validate_transaction(transaction: &Transaction) -> Result<(), ValidationE
         return Err(ValidationError::InvalidTimestamp);
     }
 
-    // Validate category is not empty
-    if transaction.category.to_str().len() == 0 {
-        return Err(ValidationError::InvalidCategory);
-    }
-
     Ok(())
 }
 
@@ -85,7 +74,7 @@ pub fn validate_transactions(transactions: &Vec<Transaction>) -> Result<(), Vali
     }
 
     for transaction in transactions.iter() {
-        validate_transaction(transaction)?;
+        validate_transaction(&transaction)?;
     }
 
     Ok(())
@@ -96,17 +85,6 @@ pub fn validate_refund_request(request: &RefundRequest) -> Result<(), Validation
     // Validate transaction ID is not zero
     if request.tx_id == 0 {
         return Err(ValidationError::InvalidTransactionId);
-    }
-
-    // Validate reason if provided
-    if let Some(reason) = &request.reason {
-        if reason.to_str().len() == 0 {
-            return Err(ValidationError::InvalidReason);
-        }
-        if reason.to_str().len() > 255 {
-            // Arbitrary limit for reason length
-            return Err(ValidationError::InvalidReason);
-        }
     }
 
     Ok(())
@@ -125,13 +103,11 @@ pub fn validate_refund_requests(requests: &Vec<RefundRequest>) -> Result<(), Val
     }
 
     // Check for duplicate transaction IDs
-    let mut seen_tx_ids = std::collections::HashSet::new();
-    for request in requests.iter() {
-        if seen_tx_ids.contains(&request.tx_id) {
+    for (index, request) in requests.iter().enumerate() {
+        if has_duplicate_tx_id_in_refunds(requests, index, request.tx_id) {
             return Err(ValidationError::DuplicateTransactionId);
         }
-        seen_tx_ids.insert(request.tx_id);
-        validate_refund_request(request)?;
+        validate_refund_request(&request)?;
     }
 
     Ok(())
@@ -165,7 +141,7 @@ pub fn validate_rating_inputs(inputs: &Vec<RatingInput>) -> Result<(), Validatio
     }
 
     for input in inputs.iter() {
-        validate_rating_input(input)?;
+        validate_rating_input(&input)?;
     }
 
     Ok(())
@@ -198,13 +174,11 @@ pub fn validate_transaction_status_updates(
     }
 
     // Check for duplicate transaction IDs
-    let mut seen_tx_ids = std::collections::HashSet::new();
-    for update in updates.iter() {
-        if seen_tx_ids.contains(&update.tx_id) {
+    for (index, update) in updates.iter().enumerate() {
+        if has_duplicate_tx_id_in_status_updates(updates, index, update.tx_id) {
             return Err(ValidationError::DuplicateTransactionId);
         }
-        seen_tx_ids.insert(update.tx_id);
-        validate_transaction_status_update(update)?;
+        validate_transaction_status_update(&update)?;
     }
 
     Ok(())
@@ -219,17 +193,6 @@ pub fn validate_bundled_transaction(
     // Validate that from and to addresses are different
     if bundled_tx.transaction.from == bundled_tx.transaction.to {
         return Err(ValidationError::SameAddress);
-    }
-
-    // Validate memo if provided
-    if let Some(memo) = &bundled_tx.memo {
-        if memo.to_str().len() == 0 {
-            return Err(ValidationError::InvalidMemo);
-        }
-        if memo.to_str().len() > 255 {
-            // Arbitrary limit for memo length
-            return Err(ValidationError::InvalidMemo);
-        }
     }
 
     Ok(())
@@ -250,7 +213,7 @@ pub fn validate_bundled_transactions(
     }
 
     for bundled_tx in bundled_txs.iter() {
-        validate_bundled_transaction(bundled_tx)?;
+        validate_bundled_transaction(&bundled_tx)?;
     }
 
     Ok(())
@@ -258,7 +221,26 @@ pub fn validate_bundled_transactions(
 
 /// Validates a user address for analytics functions
 pub fn validate_user_address(env: &Env, user: &Address) -> Result<(), ValidationError> {
-    validate_address(env, user)
+    let _ = env;
+    validate_address(user)
+}
+
+fn has_duplicate_tx_id_in_refunds(requests: &Vec<RefundRequest>, index: usize, tx_id: u64) -> bool {
+    requests
+        .iter()
+        .enumerate()
+        .any(|(other_index, request)| other_index != index && request.tx_id == tx_id)
+}
+
+fn has_duplicate_tx_id_in_status_updates(
+    updates: &Vec<TransactionStatusUpdate>,
+    index: usize,
+    tx_id: u64,
+) -> bool {
+    updates
+        .iter()
+        .enumerate()
+        .any(|(other_index, update)| other_index != index && update.tx_id == tx_id)
 }
 
 /// Validates year and month for analytics functions

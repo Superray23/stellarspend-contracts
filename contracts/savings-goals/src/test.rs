@@ -3,7 +3,7 @@
 #![cfg(test)]
 
 use crate::{SavingsGoalsContract, SavingsGoalsContractClient};
-use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Bytes, Env, Symbol, Vec};
 
 use crate::types::{
     ErrorCode, GoalResult, MilestoneAchievementRequest, MilestoneResult, SavingsGoalRequest,
@@ -42,6 +42,12 @@ fn create_valid_request(
         penalty_bps: 0,
         expiration_seconds: 0,
     }
+}
+
+fn idempotency_token(env: &Env, seed: u8) -> Bytes {
+    let mut token = Bytes::new(env);
+    token.push_back(seed);
+    token
 }
 
 #[test]
@@ -84,9 +90,9 @@ fn test_auto_milestone_events() {
     let result = client.batch_set_savings_goals(&admin, &requests);
     assert_eq!(result.successful, 1);
 
-    client.contribute_to_goal(&user, &1, &25_000_000);
-    client.contribute_to_goal(&user, &1, &25_000_000);
-    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 1));
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 2));
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 3));
 
     let triggered = client.get_triggered_milestone_percents(&1);
     assert_eq!(triggered.len(), 4);
@@ -576,7 +582,7 @@ fn test_contribute_to_goal_increases_current_amount() {
     requests.push_back(req);
     client.batch_set_savings_goals(&admin, &requests);
 
-    client.contribute_to_goal(&user, &1, &20_000_000_i128);
+    client.contribute_to_goal(&user, &1, &20_000_000_i128, &idempotency_token(&env, 1));
     let updated = client.get_goal(&1).unwrap();
 
     assert_eq!(updated.current_amount, 20_000_000);
@@ -595,7 +601,7 @@ fn test_goal_auto_closes_when_target_reached() {
     client.batch_set_savings_goals(&admin, &requests);
 
     // Contribute exactly the target amount
-    client.contribute_to_goal(&user, &1, &50_000_000_i128);
+    client.contribute_to_goal(&user, &1, &50_000_000_i128, &idempotency_token(&env, 1));
     let updated = client.get_goal(&1).unwrap();
 
     // Goal should be auto-closed
@@ -619,7 +625,7 @@ fn test_goal_auto_closes_on_over_contribution() {
     client.batch_set_savings_goals(&admin, &requests);
 
     // Contribute more than target — should be capped and goal auto-closed
-    client.contribute_to_goal(&user, &1, &999_999_999_i128);
+    client.contribute_to_goal(&user, &1, &999_999_999_i128, &idempotency_token(&env, 1));
     let updated = client.get_goal(&1).unwrap();
 
     assert_eq!(updated.is_active, false);
@@ -639,10 +645,10 @@ fn test_closed_goal_rejects_further_contributions() {
     client.batch_set_savings_goals(&admin, &requests);
 
     // Close the goal
-    client.contribute_to_goal(&user, &1, &50_000_000_i128);
+    client.contribute_to_goal(&user, &1, &50_000_000_i128, &idempotency_token(&env, 1));
 
     // This contribution should panic because the goal is closed
-    client.contribute_to_goal(&user, &1, &1_000_i128);
+    client.contribute_to_goal(&user, &1, &1_000_i128, &idempotency_token(&env, 2));
 }
 
 #[test]
@@ -659,7 +665,7 @@ fn test_contribute_with_wrong_caller_panics() {
     client.batch_set_savings_goals(&admin, &requests);
 
     // other is not the goal owner — should panic
-    client.contribute_to_goal(&other, &1, &10_000_000_i128);
+    client.contribute_to_goal(&other, &1, &10_000_000_i128, &idempotency_token(&env, 1));
 }
 
 #[test]
@@ -674,7 +680,7 @@ fn test_contribute_zero_amount_panics() {
     requests.push_back(req);
     client.batch_set_savings_goals(&admin, &requests);
 
-    client.contribute_to_goal(&user, &1, &0_i128);
+    client.contribute_to_goal(&user, &1, &0_i128, &idempotency_token(&env, 1));
 }
 
 #[test]
@@ -1240,10 +1246,10 @@ fn test_contribute_emits_milestone_events() {
     });
     client.batch_set_savings_goals(&admin, &requests);
 
-    client.contribute_to_goal(&user, &1, &25_000_000);
-    client.contribute_to_goal(&user, &1, &25_000_000);
-    client.contribute_to_goal(&user, &1, &25_000_000);
-    client.contribute_to_goal(&user, &1, &25_000_000);
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 1));
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 2));
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 3));
+    client.contribute_to_goal(&user, &1, &25_000_000, &idempotency_token(&env, 4));
 
     let triggered = client.get_triggered_milestone_percents(&1);
     assert_eq!(triggered.len(), 4);
@@ -1278,7 +1284,7 @@ fn test_record_and_get_goal_snapshots() {
     client.record_goal_snapshot(&user, &1);
 
     // Contribute
-    client.contribute_to_goal(&user, &1, &20_000_000);
+    client.contribute_to_goal(&user, &1, &20_000_000, &idempotency_token(&env, 1));
 
     // Record second snapshot
     env.ledger().set_timestamp(env.ledger().timestamp() + 100);
@@ -1387,7 +1393,12 @@ fn test_reverse_contribution_within_window() {
     let contribution_amount: i128 = 5_000_000;
 
     // Contribute and capture the contrib_id
-    let contrib_id = client.contribute_to_goal(&user, &goal_id, &contribution_amount);
+    let contrib_id = client.contribute_to_goal(
+        &user,
+        &goal_id,
+        &contribution_amount,
+        &idempotency_token(&env, 1),
+    );
 
     // Reverse immediately (still within the 24-hour window)
     let remaining = client.reverse_contribution(&user, &goal_id, &contrib_id);
@@ -1415,7 +1426,8 @@ fn test_reverse_contribution_after_window_rejected() {
     client.batch_set_savings_goals(&admin, &goal_requests);
 
     let goal_id: u64 = 1;
-    let contrib_id = client.contribute_to_goal(&user, &goal_id, &5_000_000i128);
+    let contrib_id =
+        client.contribute_to_goal(&user, &goal_id, &5_000_000i128, &idempotency_token(&env, 1));
 
     // Advance time past the 24-hour reversal window
     env.ledger()
@@ -1423,6 +1435,74 @@ fn test_reverse_contribution_after_window_rejected() {
 
     // Should panic with ReversalExpired
     client.reverse_contribution(&user, &goal_id, &contrib_id);
+}
+
+#[test]
+fn test_duplicate_contribution_idempotency_rejected_and_original_preserved() {
+    let (env, admin, client) = setup_test_contract();
+    let user = Address::generate(&env);
+
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    let mut request = create_valid_request(&env, &user, "idempotent_goal", 100_000_000);
+    request.initial_contribution = 0;
+    requests.push_back(request);
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let token = idempotency_token(&env, 42);
+    let contrib_id = client.contribute_to_goal(&user, &1, &15_000_000, &token);
+    let duplicate = client.try_contribute_to_goal(&user, &1, &15_000_000, &token);
+
+    assert!(duplicate.is_err());
+
+    let goal = client.get_goal(&1).unwrap();
+    assert_eq!(goal.current_amount, 15_000_000);
+
+    let record = client.get_contribution_record(&1, &contrib_id).unwrap();
+    assert_eq!(record.amount, 15_000_000);
+    assert_eq!(record.idempotency_token, token);
+    assert_eq!(record.reversed, false);
+}
+
+#[test]
+fn test_deadline_alerts_emit_once_per_threshold_before_deadline() {
+    let (env, admin, client) = setup_test_contract();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 500;
+    });
+
+    let user = Address::generate(&env);
+    let mut requests: Vec<SavingsGoalRequest> = Vec::new(&env);
+    let mut request = create_valid_request(&env, &user, "deadline_alerts", 100_000_000);
+    request.initial_contribution = 0;
+    request.deadline = 700;
+    requests.push_back(request);
+    client.batch_set_savings_goals(&admin, &requests);
+
+    let mut thresholds: Vec<u64> = Vec::new(&env);
+    thresholds.push_back(200);
+    thresholds.push_back(50);
+    client.set_goal_alert_thresholds(&user, &1, &thresholds);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 550;
+    });
+    assert_eq!(client.process_goal_alerts(&1), 1);
+    assert_eq!(client.process_goal_alerts(&1), 0);
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 660;
+    });
+    assert_eq!(client.process_goal_alerts(&1), 1);
+
+    let emitted = client.get_goal_alerts_emitted(&1);
+    assert_eq!(emitted.len(), 2);
+    assert!(emitted.contains(&200));
+    assert!(emitted.contains(&50));
+
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 700;
+    });
+    assert_eq!(client.process_goal_alerts(&1), 0);
 }
 
 // ==================== Completion Detection Tests ====================
@@ -1450,7 +1530,7 @@ fn test_goal_marked_complete_at_exact_target_threshold() {
     assert_eq!(initial_goal.is_active, true);
 
     // Contribute exactly to the target amount
-    client.contribute_to_goal(&user, &1, &100_000_000);
+    client.contribute_to_goal(&user, &1, &100_000_000, &idempotency_token(&env, 1));
 
     // Verify goal is marked as complete at exact threshold
     let final_progress = client.get_goal_progress(&1).unwrap();
@@ -1486,7 +1566,12 @@ fn test_goal_not_marked_complete_below_target() {
         client.test_set_goal_current_amount(&1, &0);
 
         // Contribute amount below target
-        client.contribute_to_goal(&user, &1, amount);
+        client.contribute_to_goal(
+            &user,
+            &1,
+            amount,
+            &idempotency_token(&env, (*amount % 251) as u8),
+        );
 
         // Verify goal is not marked as complete
         let progress = client.get_goal_progress(&1).unwrap();
@@ -1515,7 +1600,7 @@ fn test_goal_marked_complete_when_contribution_exceeds_target() {
     client.batch_set_savings_goals(&admin, &requests);
 
     // Contribute more than the target amount
-    client.contribute_to_goal(&user, &1, &150_000_000);
+    client.contribute_to_goal(&user, &1, &150_000_000, &idempotency_token(&env, 1));
 
     // Verify goal is marked as complete and capped at target
     let progress = client.get_goal_progress(&1).unwrap();
@@ -1559,7 +1644,7 @@ fn test_goal_completion_with_initial_contribution() {
     assert_eq!(progress2.progress_percentage, 50);
 
     // Now contribute the remaining amount to reach target
-    client.contribute_to_goal(&user, &2, &50_000_000);
+    client.contribute_to_goal(&user, &2, &50_000_000, &idempotency_token(&env, 1));
 
     let final_progress = client.get_goal_progress(&2).unwrap();
     assert_eq!(final_progress.is_complete, true);
@@ -1586,7 +1671,7 @@ fn test_incremental_contributions_toward_completion() {
     let expected_completion = [false, false, false, true];
 
     for (i, &contrib) in contributions.iter().enumerate() {
-        client.contribute_to_goal(&user, &1, &contrib);
+        client.contribute_to_goal(&user, &1, &contrib, &idempotency_token(&env, (i as u8) + 1));
 
         let progress = client.get_goal_progress(&1).unwrap();
         assert_eq!(progress.current_amount, expected_totals[i]);

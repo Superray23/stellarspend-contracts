@@ -324,8 +324,8 @@ impl BudgetAllocationContract {
             .get(&DataKey::Budget(user.clone()));
 
         if let Some(mut record) = budget_record {
-            // Reset only the spent amount, preserve the budget limit
-            record.spent = 0;
+            // This record stores the current budget amount only, so a reset
+            // advances the cycle timestamp without changing the allocation.
             record.last_updated = now;
 
             // Store updated record

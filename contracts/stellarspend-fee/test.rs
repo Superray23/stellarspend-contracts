@@ -429,7 +429,10 @@ fn test_deduct_fee_with_priority() {
     assert_eq!(fee, 1500);
     assert_eq!(net, 8500);
     assert_eq!(FeeContract::get_total_collected(env.clone()), 1500);
-    assert_eq!(FeeContract::get_user_fees_accrued(env.clone(), payer.clone()), 1500);
+    assert_eq!(
+        FeeContract::get_user_fees_accrued(env.clone(), payer.clone()),
+        1500
+    );
 
     let events = env.events().all();
     let event = events
@@ -505,8 +508,9 @@ fn test_priority_fee_events() {
 
     // Check event was emitted
     let events = env.events().all();
-    assert!(events.iter().any(|e| e.topics.0 == symbol_short!("fee") 
-        && e.topics.1 == symbol_short!("pri_cfg")));
+    assert!(events
+        .iter()
+        .any(|e| e.topics.0 == symbol_short!("fee") && e.topics.1 == symbol_short!("pri_cfg")));
     let event = events
         .iter()
         .rev()
@@ -1101,14 +1105,14 @@ fn test_deduct_batch_fees_aggregates_correctly() {
         10_000,
         PriorityLevel::Medium,
     )); // fee 100
-    // payer_b pays 2% on 5_000 USDC at medium priority  -> fee 100
+        // payer_b pays 2% on 5_000 USDC at medium priority  -> fee 100
     txs.push_back(make_tx(
         payer_b.clone(),
         usdc.clone(),
         5_000,
         PriorityLevel::Medium,
     )); // fee 100
-    // payer_a pays 1% * 2.0 (urgent) on 10_000 XLM     -> fee 200
+        // payer_a pays 1% * 2.0 (urgent) on 10_000 XLM     -> fee 200
     txs.push_back(make_tx(
         payer_a.clone(),
         xlm.clone(),
@@ -1140,7 +1144,7 @@ fn test_deduct_batch_fees_single_transaction() {
     let client = FeeContractClient::new(&env, &contract_id);
 
     client.initialize(&admin, &200u32); // 2% default
-    // Per-asset balances tracked independently
+                                        // Per-asset balances tracked independently
     assert_eq!(
         FeeContract::get_asset_fees_collected(env.clone(), xlm.clone()),
         300
@@ -1398,12 +1402,12 @@ fn test_deduct_batch_fees_emits_batch_event() {
     FeeContract::deduct_batch_fees(env.clone(), txs);
 
     let events = env.events().all();
-    assert!(events.iter().any(|e| {
-        e.topics.0 == symbol_short!("fee") && e.topics.1 == symbol_short!("batch")
-    }));
-    assert!(events.iter().any(|e| {
-        e.topics.0 == symbol_short!("fee") && e.topics.1 == symbol_short!("bat_itm")
-    }));
+    assert!(events
+        .iter()
+        .any(|e| { e.topics.0 == symbol_short!("fee") && e.topics.1 == symbol_short!("batch") }));
+    assert!(events
+        .iter()
+        .any(|e| { e.topics.0 == symbol_short!("fee") && e.topics.1 == symbol_short!("bat_itm") }));
 
     let item_event = events
         .iter()
@@ -1471,14 +1475,14 @@ fn test_calculate_batch_fees_mixed_assets_and_priorities() {
         20_000,
         PriorityLevel::Medium,
     )); // 0.5%*1.0=100
-    // USDC 3% * 2.0 (urgent) of 10000 = 600
+        // USDC 3% * 2.0 (urgent) of 10000 = 600
     txs.push_back(make_tx(
         payer.clone(),
         usdc.clone(),
         10_000,
         PriorityLevel::Urgent,
     )); // 3%*2.0=600
-    // unconfigured falls back to 1% default, low priority 0.8 = 0.8% of 5000 = 40
+        // unconfigured falls back to 1% default, low priority 0.8 = 0.8% of 5000 = 40
     txs.push_back(make_tx(
         payer.clone(),
         unconfigured.clone(),

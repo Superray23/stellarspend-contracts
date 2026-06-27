@@ -34,6 +34,46 @@ pub struct Budget {
     pub created_at: u64,
 }
 
+/// Standardized budget utilization bands.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BudgetUtilizationBand {
+    Low,
+    Moderate,
+    High,
+    Critical,
+}
+
+/// Summary analytics for budget utilization queries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BudgetUtilizationSummary {
+    /// Percent of contributed funds already spent.
+    pub utilization_percent: u32,
+    /// Total amount spent from the budget.
+    pub total_spent: i128,
+    /// Average amount spent per member.
+    pub avg_spending_per_member: i128,
+    /// Remaining unspent balance.
+    pub remaining_balance: i128,
+    /// Standardized utilization classification.
+    pub utilization_band: BudgetUtilizationBand,
+}
+
+/// Archived budget snapshot retained after active storage cleanup.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ArchivedBudget {
+    /// Final active-state budget snapshot captured during archiving.
+    pub budget: Budget,
+    /// Timestamp when the budget was deactivated.
+    pub deactivated_at: u64,
+    /// Timestamp when the archive record was created.
+    pub archived_at: u64,
+    /// Contribution IDs preserved for historical queries.
+    pub contribution_ids: Vec<u64>,
+}
+
 /// Represents a contribution to a shared budget.
 #[derive(Clone, Debug)]
 #[contracttype]
@@ -78,6 +118,12 @@ pub enum DataKey {
     Contribution(u64),
     /// Ordered contribution IDs for a budget
     BudgetContributions(u64),
+    /// Timestamp when a budget was marked inactive
+    BudgetDeactivatedAt(u64),
+    /// Archived budget snapshot by ID
+    ArchivedBudget(u64),
+    /// Retention period, in seconds, before inactive budgets are archived
+    ArchiveRetentionPeriod,
     /// Total number of budgets created
     TotalBudgetsCreated,
     /// Total number of contributions processed
@@ -182,5 +228,26 @@ impl SharedBudgetEvents {
         );
         env.events()
             .publish(topics, (previous_owner.clone(), new_owner.clone()));
+    }
+
+    /// Event emitted when a budget is marked inactive.
+    pub fn budget_deactivated(env: &Env, budget_id: u64, actor: &Address, deactivated_at: u64) {
+        let topics = (
+            symbol_short!("budget"),
+            symbol_short!("inactive"),
+            budget_id,
+        );
+        env.events()
+            .publish(topics, (actor.clone(), deactivated_at));
+    }
+
+    /// Event emitted when an inactive budget is archived.
+    pub fn budget_archived(env: &Env, budget_id: u64, archived_at: u64) {
+        let topics = (
+            symbol_short!("budget"),
+            symbol_short!("archived"),
+            budget_id,
+        );
+        env.events().publish(topics, archived_at);
     }
 }

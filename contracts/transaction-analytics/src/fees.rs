@@ -4,7 +4,7 @@
 //! Supports percentage-based fees, tiered pricing, fee cap enforcement, per-operation
 //! configuration, fee distribution splitting, and a fee pause mechanism.
 
-use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::types::{
     AnalyticsEvents, DataKey, FeeCalculationResult, FeeConfig, FeeRecipientShare, FeeTier,
@@ -53,7 +53,7 @@ pub fn distribute_fee(env: &Env, fee_amount: i128, shares: &Vec<FeeRecipientShar
     validate_recipient_shares(shares).expect("Invalid recipient shares");
     let mut distributed = 0i128;
     for (i, s) in shares.iter().enumerate() {
-        let is_last = i == (shares.len() - 1);
+        let is_last = (i as u32) == (shares.len() - 1);
         let share_amt = if is_last {
             fee_amount - distributed
         } else {
@@ -108,7 +108,7 @@ fn calculate_tiered_fee(amount: i128, tiers: &Vec<FeeTier>) -> i128 {
         return 0;
     }
 
-    let mut applicable_tier = &tiers.get(0).unwrap();
+    let mut applicable_tier = tiers.get(0).unwrap();
     for tier in tiers.iter() {
         if amount >= tier.threshold {
             applicable_tier = tier;
@@ -155,11 +155,11 @@ fn calculate_effective_rate(gross_amount: i128, fee_amount: i128) -> u32 {
 
 pub fn calculate_batch_fees(
     env: &Env,
-    amounts: &[i128],
+    amounts: &Vec<i128>,
     fee_config: &FeeConfig,
 ) -> Vec<FeeCalculationResult> {
     let mut results = Vec::new(env);
-    for &amount in amounts {
+    for amount in amounts.iter() {
         results.push_back(calculate_transaction_fee(env, amount, fee_config));
     }
     results

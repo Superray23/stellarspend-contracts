@@ -215,7 +215,7 @@ pub enum FeeModel {
     Tiered(Vec<FeeTier>),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 #[contracttype]
 pub struct FeeTier {
     pub threshold: i128,
@@ -223,7 +223,7 @@ pub struct FeeTier {
     pub default_percentage_bps: u32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 #[contracttype]
 pub struct FeeConfig {
     pub fee_model: FeeModel,
@@ -280,7 +280,7 @@ pub struct RefundBatchMetrics {
     pub processed_at: u64,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 #[contracttype]
 pub struct MonthlySpendingAnalytics {
     pub year: u32,
@@ -291,7 +291,7 @@ pub struct MonthlySpendingAnalytics {
     pub transaction_count: u32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 #[contracttype]
 pub struct UserSpendingSummary {
     pub user: Address,
@@ -372,13 +372,13 @@ impl AnalyticsEvents {
         previous: Option<FeeConfig>,
         new: FeeConfig,
     ) {
-        let topics = (symbol_short!("fee"), symbol_short!("operation_updated"));
+        let topics = (symbol_short!("fee"), symbol_short!("op_upd"));
         env.events()
             .publish(topics, (admin.clone(), operation.clone(), previous, new));
     }
 
     pub fn fee_cap_changed(env: &Env, admin: &Address, previous: Option<u64>, new: Option<u64>) {
-        let topics = (symbol_short!("fee"), symbol_short!("cap_changed"));
+        let topics = (symbol_short!("fee"), symbol_short!("capchg"));
         env.events().publish(topics, (admin.clone(), previous, new));
     }
 
@@ -474,11 +474,7 @@ impl AnalyticsEvents {
     }
 
     pub fn fee_distributed(env: &Env, recipient: &Address, amount: i128, share_bps: u32) {
-        let topics = (
-            symbol_short!("fee"),
-            symbol_short!("distributed"),
-            recipient,
-        );
+        let topics = (symbol_short!("fee"), symbol_short!("distro"), recipient);
         env.events().publish(topics, (amount, share_bps));
     }
 

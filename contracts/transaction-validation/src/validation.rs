@@ -1,12 +1,14 @@
-use soroban_sdk::Env;
+use soroban_sdk::{contracterror, Env};
 
 /// Error type for timestamp validation
-#[derive(Debug, PartialEq, Eq)]
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
 pub enum TimestampValidationError {
     /// Timestamp is too far in the future
-    FutureTimestamp,
+    FutureTimestamp = 1,
     /// Timestamp is too far in the past
-    PastTimestamp,
+    PastTimestamp = 2,
 }
 
 /// The maximum allowed difference in seconds for future timestamps.
