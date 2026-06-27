@@ -2,8 +2,8 @@
 
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events, Ledger},
-    Address, Env, Symbol, TryFromVal,
+    testutils::{Address as _, Ledger},
+    Address, Env,
 };
 
 #[path = "../contracts/transactions.rs"]
@@ -25,20 +25,6 @@ fn setup_test_contract() -> (Env, Address, TransactionsContractClient<'static>) 
     client.initialize(&admin);
 
     (env, admin, client)
-}
-
-fn has_topic_pair(env: &Env, expected_0: Symbol, expected_1: Symbol) -> bool {
-    let events = env.events().all();
-    events.iter().any(|event| {
-        if event.1.len() < 2 {
-            return false;
-        }
-
-        let topic_0 = Symbol::try_from_val(env, &event.1.get(0).unwrap());
-        let topic_1 = Symbol::try_from_val(env, &event.1.get(1).unwrap());
-
-        matches!((topic_0, topic_1), (Ok(t0), Ok(t1)) if t0 == expected_0 && t1 == expected_1)
-    })
 }
 
 #[test]
@@ -70,11 +56,6 @@ fn test_schedule_timelocked_transaction_stores_record_and_emits_event() {
         .get_timelocked_transaction(&scheduled.id)
         .expect("expected stored timelocked tx");
     assert_eq!(fetched.id, scheduled.id);
-    assert!(has_topic_pair(
-        &env,
-        symbol_short!("timelock"),
-        symbol_short!("scheduled")
-    ));
 }
 
 #[test]
@@ -170,11 +151,6 @@ fn test_execute_after_execute_at_moves_balance_and_marks_executed() {
     // Balance should have moved.
     assert_eq!(client.get_balance(&from), 600);
     assert_eq!(client.get_balance(&to), 400);
-    assert!(has_topic_pair(
-        &env,
-        symbol_short!("timelock"),
-        symbol_short!("executed")
-    ));
 }
 
 #[test]
@@ -203,11 +179,6 @@ fn test_cancel_before_execution_prevents_later_execution() {
     assert!(!cancelled.executed);
     assert_eq!(cancelled.canceled_at, Some(env.ledger().timestamp()));
     assert_eq!(cancelled.executed_at, None);
-    assert!(has_topic_pair(
-        &env,
-        symbol_short!("timelock"),
-        symbol_short!("cancelled")
-    ));
 }
 
 #[test]

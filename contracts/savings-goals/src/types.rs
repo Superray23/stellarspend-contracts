@@ -35,6 +35,20 @@ pub struct SavingsGoalRequest {
     pub expiration_seconds: u64,
 }
 
+/// Represents a completion certificate for a savings goal.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct GoalCertificate {
+    /// Associated goal ID
+    pub goal_id: u64,
+    /// User's address
+    pub user: Address,
+    /// Target amount achieved (in stroops)
+    pub target_amount: i128,
+    /// Ledger sequence when certificate was issued
+    pub issued_at: u64,
+}
+
 /// Represents a created savings goal.
 #[derive(Clone, Debug)]
 #[contracttype]
@@ -282,6 +296,8 @@ pub enum DataKey {
     GoalDeadlineAlertThresholds(u64),
     /// Tracks which alert thresholds have already fired for a goal.
     GoalDeadlineAlertSent(u64, u64),
+    /// Certificate for completed goal (goal_id -> GoalCertificate)
+    Certificate(u64),
 }
 
 /// Error codes for goal validation and creation.

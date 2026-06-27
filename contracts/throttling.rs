@@ -56,7 +56,8 @@ pub struct GlobalThrottleStats {
     pub total_violations: u64,
     pub currently_throttled_wallets: u32,
     pub last_cleanup_time: u64,
-    pub average_transactions_per_window: f64,
+    /// Violation rate scaled by 10_000 (e.g. 2500 = 25.00%).
+    pub avg_tx_per_window: u64,
 }
 
 #[derive(Clone)]
@@ -80,13 +81,11 @@ pub enum ThrottleReason {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[contracttype]
 pub enum TimeWindow {
     OneMinute = 60,
     FiveMinutes = 300,
     OneHour = 3600,
     OneDay = 86400,
-    Custom(u64),
 }
 
 #[contracterror]
@@ -136,7 +135,7 @@ impl ThrottleEvents {
     }
 
     pub fn config_updated(env: &Env, admin: &Address, config: &ThrottleConfig) {
-        let topics = (symbol_short!("throttle"), symbol_short!("config_updated"));
+        let topics = (symbol_short!("throttle"), symbol_short!("cfg_upd"));
         env.events().publish(
             topics,
             (
@@ -195,7 +194,7 @@ pub fn initialize_throttle_contract(env: &Env, admin: Address, config: ThrottleC
         total_violations: 0,
         currently_throttled_wallets: 0,
         last_cleanup_time: env.ledger().timestamp(),
-        average_transactions_per_window: 0.0,
+        avg_tx_per_window: 0,
     };
     env.storage()
         .instance()
@@ -419,7 +418,7 @@ pub fn get_global_throttle_stats(env: &Env) -> GlobalThrottleStats {
             total_violations: 0,
             currently_throttled_wallets: 0,
             last_cleanup_time: 0,
-            average_transactions_per_window: 0.0,
+            avg_tx_per_window: 0,
         })
 }
 
@@ -511,7 +510,7 @@ fn remove_from_throttled_wallets(env: &Env, wallet_address: &Address) {
     let mut new_list = Vec::<Address>::new(&env);
 
     for addr in throttled_wallets.iter() {
-        if addr != wallet_address {
+        if addr != *wallet_address {
             new_list.push_back(addr);
         }
     }
@@ -534,8 +533,10 @@ fn update_global_stats(env: &Env, is_violation: bool) {
 
     // Update average (simplified calculation)
     if stats.total_transactions_checked > 0 {
-        stats.average_transactions_per_window =
-            (stats.total_violations as f64) / (stats.total_transactions_checked as f64);
+        stats.avg_tx_per_window = stats
+            .total_violations
+            .saturating_mul(10_000)
+            / stats.total_transactions_checked;
     }
 
     env.storage()
@@ -622,5 +623,84 @@ impl ThrottleContract {
 
     pub fn get_throttle_config(env: Env) -> ThrottleConfig {
         get_throttle_config(&env)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Address, Env, Vec,
+    };
+
+    fn setup() -> (Env, Address, ThrottleContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(ThrottleContract, ());
+        let client = ThrottleContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let config = ThrottleConfig {
+            max_transactions_per_window: 3,
+            window_size_seconds: 60,
+            block_duration_seconds: 30,
+            cleanup_interval_seconds: 300,
+            enabled: true,
+            exempt_addresses: Vec::new(&env),
+        };
+        client.initialize(&admin, &config);
+        (env, admin, client)
+    }
+
+    #[test]
+    fn test_limit_reached_blocks_wallet() {
+        let (env, _admin, client) = setup();
+        let wallet = Address::generate(&env);
+
+        for _ in 0..3 {
+            assert!(client.check_transaction_throttle(&wallet).allowed);
+        }
+
+        let blocked = client.check_transaction_throttle(&wallet);
+        assert!(!blocked.allowed);
+        assert_eq!(blocked.reason, ThrottleReason::ExceededFrequency);
+        assert_eq!(blocked.remaining_transactions, 0);
+    }
+
+    #[test]
+    fn test_window_reset_allows_transactions_again() {
+        let (env, _admin, client) = setup();
+        let wallet = Address::generate(&env);
+
+        for _ in 0..3 {
+            client.check_transaction_throttle(&wallet);
+        }
+        assert!(!client.check_transaction_throttle(&wallet).allowed);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp += 61;
+        });
+
+        let after_reset = client.check_transaction_throttle(&wallet);
+        assert!(after_reset.allowed);
+        assert_eq!(after_reset.remaining_transactions, 2);
+    }
+
+    #[test]
+    fn test_admin_reset_bypasses_throttle() {
+        let (env, admin, client) = setup();
+        let wallet = Address::generate(&env);
+
+        for _ in 0..3 {
+            client.check_transaction_throttle(&wallet);
+        }
+        assert!(!client.check_transaction_throttle(&wallet).allowed);
+
+        client.reset_wallet_throttle_state(&admin, &wallet);
+
+        let after_reset = client.check_transaction_throttle(&wallet);
+        assert!(after_reset.allowed);
+        assert_eq!(after_reset.remaining_transactions, 2);
     }
 }

@@ -43,6 +43,7 @@ members = [
     "contracts/benchmarks",
     "contracts/zk-verifier",
     "contracts/pausable",
+    "contracts/allowances",
 ]
 
 [package]
@@ -78,6 +79,16 @@ path = "contracts/tests/concurrent_spending_tests.rs"
 [[test]]
 name = "storage_key_audit"
 path = "contracts/tests/storage_key_audit.rs"
+name = "governance_tests"
+path = "tests/governance_tests.rs"
+
+[[test]]
+name = "throttling_test"
+path = "contracts/tests/throttling_test.rs"
+
+[[test]]
+name = "timelock_tests"
+path = "tests/timelock_tests.rs"
 
 [workspace.package]
 version = "0.1.0"

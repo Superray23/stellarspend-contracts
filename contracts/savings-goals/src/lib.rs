@@ -25,11 +25,13 @@
 mod types;
 mod validation;
 
-use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Bytes, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, Env, Symbol, Vec,
+};
 
 pub use crate::types::{
     BatchGoalMetrics, BatchGoalResult, BatchMilestoneMetrics, BatchMilestoneResult,
-    ContributionRecord, DataKey, ErrorCode, GoalEvents, GoalResult, GoalSnapshot,
+    ContributionRecord, DataKey, ErrorCode, GoalCertificate, GoalEvents, GoalResult, GoalSnapshot,
     MilestoneAchievement, MilestoneAchievementRequest, MilestoneResult, SavingsGoal,
     SavingsGoalProgress, SavingsGoalRequest, MAX_BATCH_SIZE, REVERSAL_PERIOD_SECS,
 };
@@ -917,7 +919,7 @@ impl SavingsGoalsContract {
 
         // Auto-close the goal the first time 100% is reached
         if newly_triggered_100 && goal.is_active {
-            let mut closed_goal = goal;
+            let mut closed_goal = goal.clone();
             closed_goal.is_active = false;
             let closed_at = env.ledger().sequence() as u64;
             env.storage()
@@ -933,6 +935,20 @@ impl SavingsGoalsContract {
                 closed_goal.current_amount,
                 closed_at,
             );
+        }
+
+        // Issue a goal completion certificate the first time 100% is reached
+        if newly_triggered_100 {
+            let cert_key = DataKey::Certificate(goal_id);
+            if !env.storage().persistent().has(&cert_key) {
+                let certificate = GoalCertificate {
+                    goal_id,
+                    user: goal.user.clone(),
+                    target_amount: goal.target_amount,
+                    issued_at: env.ledger().timestamp(),
+                };
+                env.storage().persistent().set(&cert_key, &certificate);
+            }
         }
     }
     // ...existing code...
@@ -1424,6 +1440,68 @@ impl SavingsGoalsContract {
         env.storage()
             .persistent()
             .get(&DataKey::GoalClosedAt(goal_id))
+    }
+
+    /// Retrieves the goal completion certificate for a given goal.
+    /// Returns `None` if the goal hasn't reached 100% yet.
+    pub fn get_certificate(env: Env, goal_id: u64) -> Option<GoalCertificate> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Certificate(goal_id))
+    }
+
+    /// Merges an active source goal into an active target goal.
+    /// The caller must own both goals. The source goal is marked as inactive
+    /// and its balance and progress are rolled into the target goal.
+    pub fn merge_goals(env: Env, caller: Address, source_goal_id: u64, target_goal_id: u64) {
+        caller.require_auth();
+
+        if source_goal_id == target_goal_id {
+            panic_with_error!(&env, SavingsGoalError::InvalidBatch); // Can't merge into itself
+        }
+
+        let mut source_goal: SavingsGoal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Goal(source_goal_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SavingsGoalError::GoalNotFound));
+
+        let mut target_goal: SavingsGoal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Goal(target_goal_id))
+            .unwrap_or_else(|| panic_with_error!(&env, SavingsGoalError::GoalNotFound));
+
+        if source_goal.user != caller || target_goal.user != caller {
+            panic_with_error!(&env, SavingsGoalError::Unauthorized);
+        }
+
+        if !source_goal.is_active || !target_goal.is_active {
+            panic_with_error!(&env, SavingsGoalError::GoalNotActive);
+        }
+
+        // Perform merge
+        let transferred_amount = source_goal.current_amount;
+        target_goal.current_amount = target_goal
+            .current_amount
+            .saturating_add(transferred_amount);
+        source_goal.current_amount = 0;
+        source_goal.is_active = false;
+
+        target_goal.is_complete = target_goal.current_amount >= target_goal.target_amount;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Goal(source_goal_id), &source_goal);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Goal(target_goal_id), &target_goal);
+
+        Self::check_and_emit_milestones(&env, target_goal_id);
+
+        let topics = (symbol_short!("goal"), symbol_short!("merged"));
+        env.events()
+            .publish(topics, (source_goal_id, target_goal_id, transferred_amount));
     }
 
     fn default_deadline_alert_thresholds(env: &Env) -> Vec<u64> {

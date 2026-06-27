@@ -436,4 +436,28 @@ impl FeeContract {
     fn require_admin(env: &Env, admin: &Address) {
         require_admin(env, admin);
     }
+
+    /// Reconciles the tracked fee balance against the calculated total collected minus released.
+    /// Emits a reconciliation_completed event.
+    pub fn reconcile_treasury(env: Env, admin: Address) -> ReconciliationResult {
+        admin.require_auth();
+        Self::require_admin(&env, &admin);
+
+        let result = reconcile(&env);
+
+        env.events().publish(
+            (
+                soroban_sdk::symbol_short!("fee"),
+                soroban_sdk::symbol_short!("reconcile"),
+            ),
+            (
+                result.stored_balance,
+                result.calculated_balance,
+                result.discrepancy,
+                result.is_reconciled,
+            ),
+        );
+
+        result
+    }
 }
