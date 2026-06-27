@@ -43,6 +43,7 @@ members = [
     "contracts/benchmarks",
     "contracts/zk-verifier",
     "contracts/pausable",
+    "contracts/allowances",
 ]
 
 [package]
