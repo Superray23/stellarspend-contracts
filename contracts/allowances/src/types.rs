@@ -53,6 +53,9 @@ pub struct Allowance {
     pub active: bool,
     /// Whether the allowance is temporarily paused (issue #833).
     pub paused: bool,
+    /// Ledger timestamp after which the allowance expires and distributions
+    /// stop automatically (issue #839). `0` means it never expires.
+    pub end_date: u64,
 }
 
 /// Persistent storage keys for the allowances contract.
@@ -85,6 +88,10 @@ pub enum AllowanceError {
     NotPaused = 9,
     /// Allowance is paused — distribution blocked (#833)
     Paused = 10,
+    /// Allowance has passed its end date and is expired (#839)
+    Expired = 11,
+    /// Expiration timestamp must be in the future (or 0 to clear) (#839)
+    InvalidExpiration = 12,
 }
 
 impl From<AllowanceError> for soroban_sdk::Error {
