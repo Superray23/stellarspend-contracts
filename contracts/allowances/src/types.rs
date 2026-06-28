@@ -75,6 +75,22 @@ pub struct PaymentRecord {
     pub recipient: Address,
 }
 
+/// Read-only usage analytics for an allowance (issue #846).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AllowanceAnalytics {
+    /// Sum of all amounts distributed so far (`amount` × `distribution_count`).
+    pub total_distributed: i128,
+    /// Number of successful distributions.
+    pub distribution_count: u64,
+    /// Mean payment per distribution
+    /// (`total_distributed` / `distribution_count`, or 0 when none yet).
+    pub average_payment: i128,
+    /// Owner's available balance in the allowance token — the funds that remain
+    /// available to back future distributions.
+    pub remaining: i128,
+}
+
 /// Persistent storage keys for the allowances contract.
 #[contracttype]
 pub enum DataKey {

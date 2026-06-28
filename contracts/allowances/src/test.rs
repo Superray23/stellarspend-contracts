@@ -313,6 +313,25 @@ fn distribute_nonexistent_returns_error() {
     assert_eq!(err, AllowanceError::NotFound.into());
 }
 
+// ── Allowance analytics (#846) ──────────────────────────────────────────────
+
+#[test]
+fn analytics_for_new_allowance_is_zero() {
+    let (env, client, owner, recipient, token) = setup(1_000);
+    let now = env.ledger().timestamp();
+
+    let id = client.create_allowance(&owner, &recipient, &token, &100, &Frequency::Once, &now);
+    let stats = client.get_allowance_analytics(&id);
+
+    assert_eq!(stats.total_distributed, 0);
+    assert_eq!(stats.distribution_count, 0);
+    assert_eq!(stats.average_payment, 0);
+    // Nothing distributed yet → owner still holds the full funded balance.
+    assert_eq!(stats.remaining, 1_000);
+}
+
+#[test]
+fn analytics_after_one_distribution() {
 // ── Spending limits (#836) ──────────────────────────────────────────────────
 
 const WK: u64 = 604_800;
@@ -410,6 +429,40 @@ fn limit_below_amount_blocks_first_distribution() {
     let now = env.ledger().timestamp();
 
     let id = client.create_allowance(&owner, &recipient, &token, &100, &Frequency::Once, &now);
+    client.distribute(&id);
+
+    let stats = client.get_allowance_analytics(&id);
+    assert_eq!(stats.total_distributed, 100);
+    assert_eq!(stats.distribution_count, 1);
+    assert_eq!(stats.average_payment, 100);
+    assert_eq!(stats.remaining, 900);
+}
+
+#[test]
+fn analytics_across_multiple_recurring_distributions() {
+    let (env, client, owner, recipient, token) = setup(1_000);
+    let now = env.ledger().timestamp();
+
+    let id = client.create_allowance(&owner, &recipient, &token, &50, &Frequency::Weekly, &now);
+
+    // First distribution at the start window.
+    client.distribute(&id);
+    // Advance one week and distribute again.
+    env.ledger().with_mut(|l| l.timestamp = now + 604_800 + 1);
+    client.distribute(&id);
+
+    let stats = client.get_allowance_analytics(&id);
+    assert_eq!(stats.total_distributed, 100);
+    assert_eq!(stats.distribution_count, 2);
+    assert_eq!(stats.average_payment, 50);
+    assert_eq!(stats.remaining, 900);
+}
+
+#[test]
+fn analytics_for_missing_allowance_fails() {
+    let (_env, client, _owner, _recipient, _token) = setup(1_000);
+    let err = client
+        .try_get_allowance_analytics(&999)
     client.set_spending_limit(&id, &50); // 100 > 50 → even the first payment is blocked
 
     let err = client
